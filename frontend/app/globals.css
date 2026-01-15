@@ -1,0 +1,250 @@
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&family=Rajdhani:wght@400;600&display=swap");
+
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --line: #334155;
+  --accent: #3b82f6;
+  --danger: #f87171;
+  --shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 55%),
+    radial-gradient(circle at 20% 80%, rgba(34, 211, 238, 0.16), transparent 60%),
+    linear-gradient(180deg, #0b1120 0%, #0f172a 60%, #0b1120 100%);
+  color: var(--ink);
+  font-family: "Rajdhani", "Segoe UI", sans-serif;
+}
+
+.container {
+  width: min(1100px, 94vw);
+  margin: 0 auto;
+  padding: 1.25rem 0 2.5rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.layout-side {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero {
+  background: linear-gradient(135deg, #1d4ed8, #0f172a);
+  color: #fff;
+  padding: 1rem 1.2rem;
+  border-radius: 0.9rem;
+  box-shadow: var(--shadow);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  font-family: "Orbitron", "Rajdhani", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero p {
+  margin: 0.4rem 0 0;
+  opacity: 0.95;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.stack {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.inline {
+  font-size: 0.95rem;
+}
+
+label {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+input,
+button {
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.95rem;
+  background: #0b1220;
+  color: var(--ink);
+}
+
+button {
+  cursor: pointer;
+  background: #101827;
+}
+
+button:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+button.danger {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: var(--danger);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: #111827;
+  box-shadow: var(--shadow);
+}
+
+.card h3 {
+  margin-top: 0;
+}
+
+.card ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.chatbox {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  min-height: 220px;
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 0.6rem;
+  background: #0b1220;
+}
+
+.msg {
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  max-width: 90%;
+}
+
+.msg.user {
+  background: rgba(59, 130, 246, 0.18);
+  justify-self: end;
+}
+
+.msg.assistant {
+  background: rgba(15, 23, 42, 0.65);
+  justify-self: start;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+audio {
+  width: 100%;
+}
+
+.graph-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+}
+
+.graph-canvas {
+  height: 520px;
+  border-radius: 0.9rem;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(circle at center, rgba(59, 130, 246, 0.25), transparent 55%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(15, 23, 42, 0.65) 0,
+      rgba(15, 23, 42, 0.65) 22px,
+      rgba(59, 130, 246, 0.06) 23px,
+      rgba(59, 130, 246, 0.06) 24px
+    );
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.graph-panel {
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.9rem;
+  background: #0f172a;
+  box-shadow: var(--shadow);
+  min-height: 520px;
+}
+
+@media (max-width: 880px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+  .graph-layout {
+    grid-template-columns: 1fr;
+  }
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
