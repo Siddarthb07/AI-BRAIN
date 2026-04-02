@@ -1,0 +1,2 @@
+"""Brief generation package."""
+
