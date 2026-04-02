@@ -1,4 +1,13 @@
+![JARVIS AI Brain banner](https://img.shields.io/badge/JARVIS-AI%20Brain-0ea5e9?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Local-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-3D-000000?style=flat-square&logo=three.js&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)
+
 # JARVIS AI Brain (Local MVP)
+
+JARVIS is a local-first AI command system with a living 3D brain interface. It ingests GitHub repos, maps topics, pulls live learning links, and speaks briefings on demand.
 
 Fully local, zero-cost MVP with:
 
