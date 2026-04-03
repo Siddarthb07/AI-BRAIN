@@ -1,29 +1,26 @@
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# Node
-node_modules/
-.next/
-
 # Environment
 .env
 .env.local
+frontend/.env.local
 
-# Data/artifacts
-backend/data/*.json
-backend/data/audio/*
-!backend/data/.gitkeep
+# Node / Next
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
 
-# Infra volumes / secrets
-infra/ollama/
-infra/qdrant/storage/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
 
-# Root npm lock (not used)
-/package-lock.json
+# Local data and generated files
+backend/data/
+frontend/{app,components,public}/
+backend/{routers,services,data}/
 
-# OS/editor
+# OS / editor
 .DS_Store
 Thumbs.db
