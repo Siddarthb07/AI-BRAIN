@@ -1,256 +1,300 @@
-![JARVIS AI Brain banner](https://img.shields.io/badge/JARVIS-AI%20Brain-0ea5e9?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-Local-009688?style=flat-square&logo=fastapi&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white)
-![Three.js](https://img.shields.io/badge/Three.js-3D-000000?style=flat-square&logo=three.js&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)
+# JARVIS AI Brain
 
-# JARVIS AI Brain (Local MVP)
+> Local-first AI command system — 3D brain graph, daily briefs, voice I/O, RAG chat.
 
-JARVIS is a local-first AI command system with a living 3D brain interface. It ingests GitHub repos, maps topics, pulls live learning links, and speaks briefings on demand.
-
-Fully local, zero-cost MVP with:
-
-1. Command Layer (daily execution dashboard)
-2. Conversational Interface (text + voice)
-3. No paid APIs
+---
 
 ## Stack
 
-- Backend: FastAPI (Python)
-- Frontend: Next.js (React)
-- LLM: Ollama (default) or Groq (optional cloud fallback)
-- Embeddings: `sentence-transformers` (local)
-- Vector DB: Qdrant (Docker)
-- STT: Whisper via `faster-whisper` (local)
-- TTS: Coqui TTS (local)
+| Layer | Tech |
+|---|---|
+| Backend | FastAPI + Python 3.11 |
+| LLM | Ollama (llama3.2) + Groq fallback |
+| Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
+| Vector DB | Qdrant (Docker) |
+| STT | Web Speech API → Whisper |
+| TTS | American-voice pyttsx3 / Coqui → Browser SpeechSynthesis |
+| Frontend | Next.js 14 |
+| 3D | React Three Fiber + Three.js |
+| State | Zustand |
 
-## Folder Structure
+---
 
-```text
-.
-├─ backend/
-│  ├─ app/
-│  │  ├─ api/
-│  │  │  ├─ routes_brief.py
-│  │  │  ├─ routes_chat.py
-│  │  │  ├─ routes_context.py
-│  │  │  ├─ routes_ingest.py
-│  │  │  └─ routes_voice.py
-│  │  ├─ brief/
-│  │  │  └─ generator.py
-│  │  ├─ chat/
-│  │  │  └─ rag_chat.py
-│  │  ├─ ingestion/
-│  │  │  ├─ external_ingestion.py
-│  │  │  └─ github_ingestion.py
-│  │  ├─ models/
-│  │  │  └─ schemas.py
-│  │  ├─ ranking/
-│  │  │  └─ scorer.py
-│  │  ├─ services/
-│  │  │  ├─ config.py
-│  │  │  ├─ embeddings.py
-│  │  │  ├─ ollama_client.py
-│  │  │  ├─ storage.py
-│  │  │  ├─ text_utils.py
-│  │  │  └─ vector_store.py
-│  │  ├─ voice/
-│  │  │  ├─ tts_service.py
-│  │  │  └─ whisper_service.py
-│  │  └─ main.py
-│  ├─ data/
-│  ├─ requirements.txt
-│  └─ .env.example
-├─ frontend/
-│  ├─ app/
-│  │  ├─ globals.css
-│  │  ├─ layout.tsx
-│  │  └─ page.tsx
-│  ├─ components/
-│  │  ├─ ChatPanel.tsx
-│  │  └─ Dashboard.tsx
-│  ├─ lib/
-│  │  └─ api.ts
-│  ├─ package.json
-│  └─ .env.local.example
-├─ docker-compose.yml
-└─ README.md
-```
+## Quick Start (Windows)
 
-## Step-by-Step Setup
+### Prerequisites
 
-Prerequisites:
-
-- Python 3.10+
-- Node.js 18+
-- Docker Desktop
-- `ffmpeg` installed and available in PATH (required by Whisper)
-
-### 1) Start local infra (Qdrant + Ollama)
+1. **Docker Desktop** — running
+2. **Ollama** — [ollama.com](https://ollama.com) — installed and running
 
 ```bash
-docker compose up -d
+# Pull the default LLM
+ollama pull llama3.2
 ```
 
-### 2) Pull an Ollama model
+3. **Node.js 20+** — [nodejs.org](https://nodejs.org)
 
-```bash
-ollama pull llama3
-# or faster on CPU:
-# ollama pull mistral
+### Launch
+
+```batch
+# Option A — double-click
+start.bat
+
+# Option B — manual
+copy .env.example .env
+docker-compose up --build -d
 ```
 
-If you run Ollama in Docker only, exec into the container:
+Open: **http://localhost:5050**
 
-```bash
-docker exec -it athera-ollama ollama pull llama3
-```
+---
 
-### 3) Backend setup
+## Running Without Docker
+
+### Backend
 
 ```bash
 cd backend
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-# source .venv/bin/activate
 pip install -r requirements.txt
-# Windows: copy .env.example .env
-# macOS/Linux: cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Windows needs ffmpeg for Whisper:
+# Download from https://ffmpeg.org and add to PATH
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Optional: use Groq instead of local Ollama for `/chat`
-
-```env
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_xxx
-GROQ_MODEL=llama-3.1-8b-instant
-```
-
-If you keep `LLM_PROVIDER=ollama` (default), no Groq key is used.
-
-### 4) Frontend setup
+### Frontend
 
 ```bash
 cd frontend
 npm install
-# Windows: copy .env.local.example .env.local
-# macOS/Linux: cp .env.local.example .env.local
 npm run dev
 ```
 
-Open `http://localhost:5173`.
-
-## API Endpoints
-
-- `POST /context` store local user context
-- `GET /context` fetch current context
-- `POST /ingest/github` ingest one repo, extract tech stack/keywords, chunk + embed + store
-- `GET /ingest/external` ingest Hacker News + GitHub trending
-- `GET /brief` generate ranked top-5 insights
-- `POST /chat` RAG chat via configured LLM provider (Ollama or Groq)
-- `POST /voice/input` audio -> text (Whisper)
-- `POST /voice/output` text -> audio (Coqui TTS)
-
-## Example API Calls
-
-### Save context
+### Qdrant (vector DB)
 
 ```bash
-curl -X POST http://localhost:8000/context \
-  -H "Content-Type: application/json" \
-  -d '{
-    "daily_goals": ["Ship FastAPI ranking engine", "Test voice loop"],
-    "active_project": "JARVIS AI Brain"
-  }'
+docker run -p 6333:6333 qdrant/qdrant
 ```
 
-### Ingest a GitHub repository
+---
 
-```bash
-curl -X POST http://localhost:8000/ingest/github \
-  -H "Content-Type: application/json" \
-  -d '{"repo":"tiangolo/fastapi"}'
+## First Use Walkthrough
+
+1. **Open** http://localhost:5050 — the 3D brain loads with fallback data
+2. **Click `+ GITHUB`** in the top bar → enter your GitHub username → click **INGEST**
+   - All your repos get indexed into Qdrant in the background
+   - Brain graph nodes update with your actual repos
+3. **Click `↺ HN`** to pull today's Hacker News signals
+4. **BRIEF tab** → Click **▶ READ ALOUD** to have JARVIS narrate your daily brief
+5. **CHAT tab** → Ask anything: `"What should I work on today?"` or `"Summarize my repos"`
+6. **VOICE tab** → Click **⏺ HOLD TO SPEAK** → speak → JARVIS transcribes + responds + reads back
+7. **Click any node** in the 3D brain → details appear in the NODES panel
+
+---
+
+## API Reference
+
+### Health
+```
+GET http://localhost:8000/health
+→ { "status": "ok" }
 ```
 
-### Ingest external signals
-
-```bash
-curl http://localhost:8000/ingest/external
+### Set Context
+```
+POST http://localhost:8000/context
+{
+  "daily_goals": ["Ship LexProbe MVP", "Review PRs"],
+  "active_project": "LexProbe",
+  "focus_time": "09:00-12:00"
+}
 ```
 
-### Generate daily brief
+### Ingest GitHub User
+```
+GET http://localhost:8000/ingest/github/user/siddharthmishra
+→ { "status": "ingesting", "repo_count": 12, "repos": [...] }
+```
 
-```bash
-curl http://localhost:8000/brief
+### Ingest Single Repo
+```
+POST http://localhost:8000/ingest/github
+{ "owner": "siddharthmishra", "repo": "lexprobe" }
+```
+
+### Pull HN Signals
+```
+GET http://localhost:8000/ingest/external
+→ { "status": "ok", "stories": 15, "top": [...] }
+```
+
+### Daily Brief
+```
+GET http://localhost:8000/brief
+→ {
+    "date": "Tuesday, April 1 2025",
+    "greeting": "Good morning...",
+    "priority_actions": ["🔥 Ship...", ...],
+    "insights": [...],
+    "learning_goals": [...],
+    "voice_summary": "..."
+  }
 ```
 
 ### Chat
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"What should I focus on today for my project?"}'
+```
+POST http://localhost:8000/chat
+{ "message": "How is my LexProbe architecture?" }
+→ { "response": "Your LexProbe stack...", "context_used": true }
 ```
 
-### Voice input (transcribe)
-
-```bash
-curl -X POST http://localhost:8000/voice/input \
-  -F "file=@sample.webm"
+### Voice — Transcribe Audio
+```
+POST http://localhost:8000/voice/input
+Content-Type: multipart/form-data
+file: <audio.webm>
+→ { "text": "what should I work on today" }
 ```
 
-### Voice output (synthesize)
-
-```bash
-curl -X POST http://localhost:8000/voice/output \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Your top priority is to implement the ranking engine."}' \
-  --output reply.wav
+### Voice — Synthesize Speech
+```
+POST http://localhost:8000/voice/output
+{ "text": "JARVIS online. Here is your brief..." }
+→ audio/wav binary
 ```
 
-## Sample Outputs
-
-### `GET /brief`
-
-```json
-{
-  "insights": [
-    {
-      "signal": "tiangolo/fastapi",
-      "why_it_matters": "This github_repo signal aligns with `JARVIS AI Brain` (project relevance 0.84, goal alignment 0.79).",
-      "action": "Scan `tiangolo/fastapi` and extract one implementation pattern to apply to your active project today.",
-      "effort": "30-45 min",
-      "priority": "high"
-    }
-  ]
-}
+### Voice — Test TTS
+```
+GET http://localhost:8000/voice/test
+→ audio/wav binary
 ```
 
-### `POST /chat`
+---
 
-```json
-{
-  "reply": "Start with the ranking engine and brief quality. In the next 90 minutes: 1) ingest external + repo data, 2) validate score weights with 10 signals, 3) tighten action outputs to one concrete next step each.",
-  "sources": [
-    {
-      "id": "a8d6...",
-      "title": "tiangolo/fastapi (chunk 1)",
-      "source": "github_repo",
-      "score": 0.8123
-    }
-  ]
-}
+## Voice Architecture
+
+```
+You speak
+    ↓
+Browser Web Speech API  ──(primary)──→  Transcribed text
+    ↓ (if unavailable)
+MediaRecorder (webm)
+    ↓
+POST /voice/input → Whisper (backend)
+    ↓
+Transcribed text → POST /chat → JARVIS response
+    ↓
+POST /voice/output → pyttsx3 / Coqui  ──(primary)──→  Audio playback
+    ↓ (if backend TTS fails)
+Browser SpeechSynthesis API
 ```
 
-## Notes
+---
 
-- First Whisper/Coqui run downloads model files; initial call can take time.
-- To keep latency closer to 3s:
-  - use smaller Ollama model (`mistral`)
-  - keep context chunks short
-  - run with CPU-optimized whisper (`base`, `int8`) or GPU if available
-- All data is local in `backend/data` and Qdrant volume under `infra/qdrant/storage`.
+## Configuration
+
+Edit `.env`:
+
+```env
+# LLM
+OLLAMA_MODEL=llama3.2        # or: mistral, codellama, phi3
+GROQ_API_KEY=gsk_...         # optional, from console.groq.com
+
+# GitHub (optional, 5000 req/hr vs 60)
+GITHUB_TOKEN=ghp_...
+
+# Speech
+WHISPER_MODEL=base           # tiny | base | small | medium
+TTS_ENGINE=pyttsx3           # pyttsx3 | coqui | espeak | auto
+TTS_VOICE=american           # prefers clear US-English voices
+TTS_ESPEAK_VOICE=en-us       # fallback backend voice if espeak is used
+
+# Google Calendar
+GOOGLE_CLIENT_ID=...         # OAuth web app client id
+GOOGLE_CLIENT_SECRET=...     # OAuth web app client secret
+GOOGLE_REDIRECT_URI=http://localhost:8001/calendar/google/callback
+GOOGLE_FRONTEND_URL=http://localhost:5050
+GOOGLE_CALENDAR_ID=primary
+```
+
+---
+
+## Google Calendar Setup
+
+1. Create a Google OAuth client for a web application.
+2. Enable the Google Calendar API for that project.
+3. Add `http://localhost:8001/calendar/google/callback` as an authorized redirect URI.
+4. Put the client id and secret into `.env`, rebuild with `docker compose up -d --build`, then open the new `CAL` tab in the UI.
+
+Once connected, the brief and chat views use upcoming events as schedule context.
+
+---
+
+## Folder Structure
+
+```
+jarvis-ai-brain/
+├── backend/
+│   ├── main.py                  # FastAPI app + CORS
+│   ├── routers/
+│   │   ├── context.py           # GET/POST /context
+│   │   ├── ingest.py            # /ingest/github, /ingest/external
+│   │   ├── brief.py             # GET /brief
+│   │   ├── chat.py              # POST /chat
+│   │   └── voice.py             # POST /voice/input, /voice/output
+│   ├── services/
+│   │   ├── llm.py               # Ollama + Groq chat_completion()
+│   │   ├── rag.py               # Qdrant + local keyword fallback
+│   │   ├── github.py            # GitHub API + fallback data
+│   │   ├── hn.py                # Hacker News Firebase API
+│   │   ├── tts.py               # Coqui / pyttsx3 / espeak / silent WAV
+│   │   ├── stt.py               # Whisper / faster-whisper
+│   │   └── store.py             # In-memory + JSON persistence
+│   ├── data/                    # Persisted JSON state + knowledge store
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── app/
+│   │   ├── page.js              # Main layout: brain + side panel
+│   │   ├── layout.js            # Root HTML + fonts
+│   │   ├── globals.css          # Cyberpunk design system
+│   │   └── store.js             # Zustand global state + API calls
+│   ├── components/
+│   │   ├── BrainGraph.jsx       # React Three Fiber 3D graph
+│   │   ├── BriefPanel.jsx       # Daily brief UI
+│   │   ├── ChatPanel.jsx        # JARVIS chat UI
+│   │   ├── VoicePanel.jsx       # Voice record/play UI
+│   │   ├── NodePanel.jsx        # Clicked node detail
+│   │   └── HUD.jsx              # Top status bar
+│   ├── .env.local
+│   ├── next.config.js
+│   ├── package.json
+│   └── Dockerfile
+├── docker-compose.yml
+├── .env.example
+├── start.bat                    # Windows one-click start
+└── README.md
+```
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|---|---|
+| Docker daemon not found | Start Docker Desktop |
+| Ollama timeout | Run `ollama serve` separately, or add `GROQ_API_KEY` |
+| Microphone not working | Use Chrome/Edge; allow mic in browser settings |
+| TTS silent output | Backend TTS fell back to silent WAV; browser SpeechSynthesis still works |
+| 3D graph empty | Click `+ GITHUB` and ingest your repos |
+| Qdrant connection refused | Run `docker-compose up qdrant -d` first |
+| Whisper model slow | Switch to `WHISPER_MODEL=tiny` in `.env` |
+
+---
+
+## Extending JARVIS
+
+- **Add YouTube scraping**: implement `services/youtube.py` using yt-dlp
+- **Add a calendar agent**: `POST /context` with upcoming events from Google Calendar API
+- **Switch LLM**: change `OLLAMA_MODEL=codellama` for code-focused queries
+- **Upgrade TTS**: set `TTS_ENGINE=coqui` and install `TTS` package for neural voice
+- **Persistent chat history**: replace `_history` list in `routers/chat.py` with SQLite
