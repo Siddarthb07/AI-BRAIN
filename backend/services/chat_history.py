@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(__file__).parent.parent / "data" / "jarvis.db"
+_DB_LOCK = threading.RLock()
 
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -52,7 +56,7 @@ def _now() -> str:
 def create_session(title: str = "New chat") -> dict[str, Any]:
     sid = str(uuid.uuid4())
     ts = _now()
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         conn.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
             (sid, title[:120], ts, ts),
@@ -61,7 +65,7 @@ def create_session(title: str = "New chat") -> dict[str, Any]:
 
 
 def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         rows = conn.execute(
             "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ?",
             (limit,),
@@ -70,7 +74,7 @@ def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def get_session(session_id: str) -> dict[str, Any] | None:
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         row = conn.execute(
             "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?",
             (session_id,),
@@ -79,7 +83,7 @@ def get_session(session_id: str) -> dict[str, Any] | None:
 
 
 def get_messages(session_id: str, limit: int = 100) -> list[dict[str, Any]]:
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         rows = conn.execute(
             "SELECT role, content, meta_json, created_at FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?",
             (session_id, limit),
@@ -101,7 +105,7 @@ def append_message(session_id: str, role: str, content: str, meta: dict | None =
 
     ts = _now()
     meta_json = json.dumps(meta) if meta else None
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         conn.execute(
             "INSERT INTO messages (session_id, role, content, meta_json, created_at) VALUES (?, ?, ?, ?, ?)",
             (session_id, role, content, meta_json, ts),
@@ -110,7 +114,7 @@ def append_message(session_id: str, role: str, content: str, meta: dict | None =
 
 
 def delete_session(session_id: str) -> bool:
-    with _connect() as conn:
+    with _DB_LOCK, _connect() as conn:
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         return cur.rowcount > 0

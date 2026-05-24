@@ -42,6 +42,8 @@ async def chat_stream(message: str, session_id: Optional[str] = None):
 
 @router.post("")
 async def chat(payload: ChatMessage):
+    if not payload.message.strip():
+        raise HTTPException(400, "Message is empty")
     return await jarvis_orchestrator.run_chat(
         payload.message,
         session_id=payload.session_id,
