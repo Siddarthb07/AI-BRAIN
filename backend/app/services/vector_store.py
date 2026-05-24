@@ -19,10 +19,17 @@ class VectorStore:
     def __init__(self) -> None:
         settings = get_settings()
         self.collection = settings.qdrant_collection
-        self.client = QdrantClient(url=settings.qdrant_url)
-        self._ensure_collection()
+        self.client: Optional[QdrantClient] = None
+        self.enabled = True
+        try:
+            self.client = QdrantClient(url=settings.qdrant_url)
+            self._ensure_collection()
+        except Exception:
+            self.enabled = False
 
     def _ensure_collection(self) -> None:
+        if not self.client:
+            return
         embedder = get_embedding_service()
         exists = self.client.collection_exists(self.collection)
         if not exists:
@@ -32,23 +39,22 @@ class VectorStore:
             )
 
     def upsert(self, documents: List[VectorDocument]) -> None:
-        if not documents:
+        if not documents or not self.enabled or not self.client:
             return
-        points = [
-            PointStruct(id=doc.id, vector=doc.vector, payload=doc.payload) for doc in documents
-        ]
-        self.client.upsert(collection_name=self.collection, wait=True, points=points)
+        points = [PointStruct(id=doc.id, vector=doc.vector, payload=doc.payload) for doc in documents]
+        try:
+            self.client.upsert(collection_name=self.collection, wait=True, points=points)
+        except Exception:
+            self.enabled = False
 
     def search(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
+        if not self.enabled or not self.client:
+            return []
         hits = self.client.search(
             collection_name=self.collection, query_vector=query_vector, limit=limit
         )
         return [
-            {
-                "id": str(hit.id),
-                "score": float(hit.score),
-                "payload": hit.payload or {},
-            }
+            {"id": str(hit.id), "score": float(hit.score), "payload": hit.payload or {}}
             for hit in hits
         ]
 

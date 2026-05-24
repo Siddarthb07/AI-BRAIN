@@ -1,0 +1,27 @@
+name: JARVIS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          cd backend
+          pip install -r requirements.txt
+      - name: pytest
+        env:
+          DEMO_MODE: '0'
+          VAULT_PATH: ${{ github.workspace }}/backend/data/test_vault
+        run: |
+          cd backend
+          python -m pytest tests/ -q

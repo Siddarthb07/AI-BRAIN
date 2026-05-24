@@ -2,26 +2,33 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { BriefInsight, getBrief, getContext, ingestExternal, ingestGithub, setContext, synthesizeSpeech } from "../lib/api";
+import {
+  BriefInsight,
+  getBrief,
+  getContext,
+  getGraph,
+  getInsights,
+  ingestExternal,
+  ingestGithub,
+  ingestGithubUser,
+  setContext,
+  speakText
+} from "../lib/api";
 
 export function Dashboard() {
   const [goalsInput, setGoalsInput] = useState("");
   const [project, setProject] = useState("");
   const [repoInput, setRepoInput] = useState("");
-  const [brief, setBrief] = useState<BriefInsight[]>([
-    {
-      signal: "New AI repo trending",
-      why_it_matters: "Relevant to your backend AI work",
-      action: "Review repo and extract ideas",
-      effort: "1 hour",
-      priority: "HIGH"
-    }
-  ]);
-  const [status, setStatus] = useState("");
+  const [githubUser, setGithubUser] = useState("Siddarthb07");
+  const [focusRepos, setFocusRepos] = useState<string[]>([]);
+  const [focusTopics, setFocusTopics] = useState("");
+  const [repoOptions, setRepoOptions] = useState<string[]>([]);
+  const [brief, setBrief] = useState<BriefInsight[]>([]);
+  const [insights, setInsights] = useState<{ title: string; url?: string }[]>([]);
+  const [status, setStatus] = useState("Ready");
   const [loadingBrief, setLoadingBrief] = useState(false);
 
   const actions = useMemo(() => brief.map((b) => b.action), [brief]);
-  const learning = useMemo(() => brief.map((b) => b.signal), [brief]);
 
   useEffect(() => {
     let mounted = true;
@@ -31,16 +38,27 @@ export function Dashboard() {
         if (!mounted) return;
         setProject(context.active_project ?? "");
         setGoalsInput((context.daily_goals ?? []).join(", "));
+        setFocusRepos(context.focus_repos ?? []);
+        setFocusTopics((context.focus_topics ?? []).join(", "));
       } catch {
-        // Initial context may not exist yet.
+        // ignore
+      }
+      try {
+        const graph = await getGraph();
+        const repoNames = (graph.nodes || [])
+          .filter((node: { kind: string; name: string }) => node.kind === "github_repo")
+          .map((node: { name: string }) => node.name);
+        setRepoOptions(Array.from(new Set(repoNames)).slice(0, 40));
+      } catch {
+        // ignore
       }
       await refreshBrief();
+      await refreshInsights();
     }
     init();
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function refreshBrief() {
@@ -48,11 +66,20 @@ export function Dashboard() {
     try {
       const data = await getBrief();
       setBrief(data.insights);
-      setStatus("Daily brief refreshed.");
+      setStatus("Brief refreshed.");
     } catch (err) {
-      setStatus(`Brief unavailable. Showing fallback data. ${(err as Error).message}`);
+      setStatus(`Brief unavailable. ${(err as Error).message}`);
     } finally {
       setLoadingBrief(false);
+    }
+  }
+
+  async function refreshInsights() {
+    try {
+      const data = await getInsights();
+      setInsights(data);
+    } catch {
+      setInsights([]);
     }
   }
 
@@ -62,8 +89,17 @@ export function Dashboard() {
       .split(",")
       .map((g) => g.trim())
       .filter(Boolean);
+    const focus_topics = focusTopics
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
     try {
-      await setContext({ daily_goals, active_project: project.trim() });
+      await setContext({
+        daily_goals,
+        active_project: project.trim(),
+        focus_repos: focusRepos,
+        focus_topics
+      });
       setStatus("Context saved.");
       await refreshBrief();
     } catch (err) {
@@ -77,6 +113,7 @@ export function Dashboard() {
       const result = await ingestExternal();
       setStatus(result.message || "External ingestion complete.");
       await refreshBrief();
+      await refreshInsights();
     } catch (err) {
       setStatus((err as Error).message);
     }
@@ -91,6 +128,19 @@ export function Dashboard() {
       setStatus(result.message || "GitHub ingestion complete.");
       setRepoInput("");
       await refreshBrief();
+      await refreshInsights();
+    } catch (err) {
+      setStatus((err as Error).message);
+    }
+  }
+
+  async function runGithubUserIngest() {
+    try {
+      setStatus("Indexing all GitHub repos...");
+      const result = await ingestGithubUser(githubUser.trim() || "Siddarthb07");
+      setStatus(result.message || "GitHub user ingestion complete.");
+      await refreshBrief();
+      await refreshInsights();
     } catch (err) {
       setStatus((err as Error).message);
     }
@@ -100,49 +150,21 @@ export function Dashboard() {
     const text = brief
       .map(
         (item, idx) =>
-          `Insight ${idx + 1}. ${item.signal}. Why it matters: ${item.why_it_matters}. Action: ${item.action}. Effort: ${item.effort}. Priority: ${item.priority}.`
+          `Insight ${idx + 1}. ${item.signal}. Why it matters: ${item.why_it_matters}. Action: ${item.action}.`
       )
       .join(" ");
     if (!text.trim()) return;
-    try {
-      setStatus("Generating brief audio...");
-      const audio = await synthesizeSpeech(text);
-      const url = URL.createObjectURL(audio);
-      const player = new Audio(url);
-      player.play().catch(() => undefined);
-      setStatus("Brief readout started.");
-    } catch (err) {
-      setStatus(`Readout failed. ${(err as Error).message}`);
-    }
-  }
-
-  async function readAllAloud() {
-    const contextText = `Active project ${project || "not set"}. Daily goals ${goalsInput || "not set"}.`;
-    const actionsText = actions.length ? `Actions: ${actions.join(". ")}.` : "No actions yet.";
-    const learningText = learning.length ? `Learning focus: ${learning.join(". ")}.` : "No learning items yet.";
-    const briefText = brief
-      .map(
-        (item, idx) =>
-          `Insight ${idx + 1}. ${item.signal}. ${item.why_it_matters}. ${item.action}.`
-      )
-      .join(" ");
-    const fullText = `${contextText} ${briefText} ${actionsText} ${learningText}`;
-    try {
-      setStatus("Generating full readout...");
-      const audio = await synthesizeSpeech(fullText);
-      const url = URL.createObjectURL(audio);
-      const player = new Audio(url);
-      player.play().catch(() => undefined);
-      setStatus("Full readout started.");
-    } catch (err) {
-      setStatus(`Readout failed. ${(err as Error).message}`);
-    }
+    await speakText(text);
   }
 
   return (
     <section className="panel">
-      <h2>Command Layer</h2>
-      <form className="stack" onSubmit={saveContext}>
+      <div className="panel-header">
+        <h2>Command Center</h2>
+        <span className="pill">{status}</span>
+      </div>
+
+      <form className="section-grid" onSubmit={saveContext}>
         <label>
           Active project
           <input
@@ -152,77 +174,121 @@ export function Dashboard() {
           />
         </label>
         <label>
-          Daily goals (comma separated)
+          Daily goals
           <input
             value={goalsInput}
             onChange={(e) => setGoalsInput(e.target.value)}
-            placeholder="Ship backend ranking, test voice flow, refine brief"
+            placeholder="Priorities for today"
           />
         </label>
         <div className="row">
-          <button type="submit">Save Context</button>
+          <button type="submit">Save</button>
           <button type="button" onClick={refreshBrief} disabled={loadingBrief}>
             {loadingBrief ? "Refreshing..." : "Refresh Brief"}
           </button>
           <button type="button" onClick={readBriefAloud}>
             Read Brief
           </button>
-          <button type="button" onClick={readAllAloud}>
-            Read All
-          </button>
         </div>
       </form>
 
-      <div className="stack">
+      <details className="details" open>
+        <summary>Focus repos</summary>
+        <div className="scroll">
+          <div className="chip-grid">
+            {repoOptions.length === 0 ? (
+              <span className="muted">Run GitHub ingestion to load repos.</span>
+            ) : (
+              repoOptions.map((repo) => (
+                <button
+                  key={repo}
+                  type="button"
+                  className={`chip ${focusRepos.includes(repo) ? "active" : ""}`}
+                  onClick={() => {
+                    if (focusRepos.includes(repo)) {
+                      setFocusRepos((prev) => prev.filter((item) => item !== repo));
+                    } else {
+                      setFocusRepos((prev) => [...prev, repo]);
+                    }
+                  }}
+                >
+                  {repo}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </details>
+
+      <details className="details">
+        <summary>Learning topics</summary>
+        <input
+          value={focusTopics}
+          onChange={(e) => setFocusTopics(e.target.value)}
+          placeholder="agents, rag, fastapi"
+        />
+      </details>
+
+      <div className="section">
         <div className="row">
           <button type="button" onClick={runExternalIngest}>
-            Ingest External Signals
+            Ingest Intel
+          </button>
+          <button type="button" onClick={runGithubUserIngest}>
+            Ingest All Repos
           </button>
         </div>
         <form className="row" onSubmit={runGithubIngest}>
           <input
             value={repoInput}
             onChange={(e) => setRepoInput(e.target.value)}
-            placeholder="owner/repo or GitHub URL"
+            placeholder="owner/repo"
           />
-          <button type="submit">Ingest GitHub Repo</button>
+          <button type="submit">Ingest Repo</button>
         </form>
+        <label>
+          GitHub username
+          <input value={githubUser} onChange={(e) => setGithubUser(e.target.value)} />
+        </label>
       </div>
 
-      <p className="status">{status}</p>
+      <div className="section">
+        <h3>Brief highlights</h3>
+        <div className="list compact">
+          {brief.slice(0, 4).map((item, idx) => (
+            <div key={`${item.signal}-${idx}`} className="brief-item">
+              <strong>{item.signal}</strong>
+              <span>{item.action}</span>
+            </div>
+          ))}
+          {brief.length === 0 ? <span className="muted">Run ingestion to generate insights.</span> : null}
+        </div>
+      </div>
 
-      <div className="grid2">
-        <article className="card">
-          <h3>Daily Brief</h3>
-          <ul>
-            {brief.map((item, idx) => (
-              <li key={`${item.signal}-${idx}`}>
-                <p>
-                  <strong>{item.signal}</strong> ({item.priority})
-                </p>
-                <p>{item.why_it_matters}</p>
-                <p>
-                  Action: {item.action} | Effort: {item.effort}
-                </p>
-              </li>
-            ))}
-            {brief.length === 0 ? <li>Run ingestion to generate insights.</li> : null}
-          </ul>
-        </article>
+      <details className="details">
+        <summary>Intel feeds</summary>
+        <div className="list compact">
+          {insights.slice(0, 6).map((item) =>
+            item.url ? (
+              <a key={item.title} href={item.url} target="_blank" rel="noreferrer">
+                {item.title}
+              </a>
+            ) : (
+              <span key={item.title}>{item.title}</span>
+            )
+          )}
+          {insights.length === 0 ? <span className="muted">No signals yet.</span> : null}
+        </div>
+      </details>
 
-        <article className="card">
-          <h3>Actions</h3>
-          <ul>
-            {actions.length ? actions.map((a, i) => <li key={`${a}-${i}`}>{a}</li>) : <li>No actions yet.</li>}
-          </ul>
-        </article>
-
-        <article className="card">
-          <h3>Learning</h3>
-          <ul>
-            {learning.length ? learning.map((l, i) => <li key={`${l}-${i}`}>{l}</li>) : <li>No learning items yet.</li>}
-          </ul>
-        </article>
+      <div className="section">
+        <h3>Action queue</h3>
+        <div className="list compact">
+          {actions.slice(0, 5).map((a, i) => (
+            <span key={`${a}-${i}`}>{a}</span>
+          ))}
+          {actions.length === 0 ? <span className="muted">No actions yet.</span> : null}
+        </div>
       </div>
     </section>
   );

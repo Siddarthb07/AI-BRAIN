@@ -1,14 +1,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&family=Rajdhani:wght@400;600&display=swap");
 
 :root {
-  --bg: #0f172a;
-  --panel: #1e293b;
+  --bg: #0b1120;
+  --panel: #0f172a;
   --ink: #e2e8f0;
   --muted: #94a3b8;
-  --line: #334155;
-  --accent: #3b82f6;
+  --line: rgba(148, 163, 184, 0.18);
+  --accent: #38bdf8;
   --danger: #f87171;
-  --shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+  --shadow: 0 10px 24px rgba(2, 6, 23, 0.5);
 }
 
 * {
@@ -28,37 +28,37 @@ body {
 }
 
 .container {
-  width: min(1100px, 94vw);
+  width: min(1160px, 94vw);
   margin: 0 auto;
   padding: 1.25rem 0 2.5rem;
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .layout {
   display: grid;
-  grid-template-columns: 2.2fr 1fr;
-  gap: 1rem;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.25rem;
   align-items: start;
 }
 
 .layout-side {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .hero {
-  background: linear-gradient(135deg, #1d4ed8, #0f172a);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(15, 23, 42, 0.9));
   color: #fff;
-  padding: 1rem 1.2rem;
+  padding: 0.9rem 1.2rem;
   border-radius: 0.9rem;
   box-shadow: var(--shadow);
-  border: 1px solid rgba(59, 130, 246, 0.4);
+  border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
 .hero h1 {
   margin: 0;
-  font-size: 1.8rem;
+  font-size: 1.5rem;
   font-family: "Orbitron", "Rajdhani", sans-serif;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -66,19 +66,39 @@ body {
 
 .hero p {
   margin: 0.4rem 0 0;
-  opacity: 0.95;
+  opacity: 0.9;
+  font-size: 0.95rem;
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 0.9rem;
-  padding: 1rem;
+  padding: 1rem 1.1rem;
   box-shadow: var(--shadow);
 }
 
 .panel h2 {
   margin-top: 0;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pill {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent);
+  font-size: 0.85rem;
 }
 
 .stack {
@@ -110,13 +130,13 @@ button {
   border-radius: 0.55rem;
   padding: 0.65rem 0.75rem;
   font-size: 0.95rem;
-  background: #0b1220;
+  background: rgba(15, 23, 42, 0.75);
   color: var(--ink);
 }
 
 button {
   cursor: pointer;
-  background: #101827;
+  background: rgba(30, 41, 59, 0.75);
 }
 
 button:hover {
@@ -145,7 +165,7 @@ button.danger {
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   padding: 0.75rem;
-  background: #111827;
+  background: rgba(15, 23, 42, 0.85);
   box-shadow: var(--shadow);
 }
 
@@ -164,12 +184,12 @@ button.danger {
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   padding: 0.75rem;
-  min-height: 220px;
-  max-height: 360px;
+  min-height: 180px;
+  max-height: 280px;
   overflow: auto;
   display: grid;
   gap: 0.6rem;
-  background: #0b1220;
+  background: rgba(15, 23, 42, 0.9);
 }
 
 .msg {
@@ -205,46 +225,176 @@ audio {
   width: 100%;
 }
 
-.graph-layout {
+.split {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 2.3fr 1fr;
   gap: 1rem;
+  align-items: start;
 }
 
-.graph-canvas {
+.brain-wrap {
   height: 520px;
   border-radius: 0.9rem;
   border: 1px solid var(--line);
   background:
-    radial-gradient(circle at center, rgba(59, 130, 246, 0.25), transparent 55%),
+    radial-gradient(circle at center, rgba(59, 130, 246, 0.18), transparent 60%),
     repeating-linear-gradient(
       0deg,
-      rgba(15, 23, 42, 0.65) 0,
-      rgba(15, 23, 42, 0.65) 22px,
-      rgba(59, 130, 246, 0.06) 23px,
-      rgba(59, 130, 246, 0.06) 24px
+      rgba(15, 23, 42, 0.55) 0,
+      rgba(15, 23, 42, 0.55) 28px,
+      rgba(59, 130, 246, 0.05) 29px,
+      rgba(59, 130, 246, 0.05) 30px
     );
   box-shadow: var(--shadow);
   overflow: hidden;
+  position: relative;
 }
 
-.graph-panel {
+.brain-overlay {
+  position: absolute;
+  inset: 10px;
+  border: 1px dashed rgba(148, 163, 184, 0.2);
+  border-radius: 0.8rem;
+  pointer-events: none;
+}
+
+.scanlines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0.02) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  pointer-events: none;
+}
+
+.side-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.section {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.section-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.details {
+  margin-top: 0.8rem;
   border: 1px solid var(--line);
-  border-radius: 0.9rem;
-  padding: 0.9rem;
-  background: #0f172a;
-  box-shadow: var(--shadow);
-  min-height: 520px;
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.scroll {
+  max-height: 160px;
+  overflow: auto;
+  padding: 0.5rem 0;
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.7rem;
+  background: rgba(15, 23, 42, 0.8);
+  font-size: 0.85rem;
+}
+
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.list.compact {
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.brief-item {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.6rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--line);
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.status-dots {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.status-dot .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.status-dot .dot.ok {
+  background: #34d399;
+}
+
+.status-dot .dot.bad {
+  background: var(--danger);
+}
+
+.pill.warn {
+  border: 1px solid #fbbf24;
+  color: #fbbf24;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
 }
 
 @media (max-width: 880px) {
   .grid2 {
     grid-template-columns: 1fr;
   }
-  .graph-layout {
+  .layout {
     grid-template-columns: 1fr;
   }
-  .layout {
+  .split {
     grid-template-columns: 1fr;
   }
 }

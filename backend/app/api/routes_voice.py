@@ -8,10 +8,9 @@ from fastapi.responses import FileResponse
 from app.models.schemas import TTSIn
 from app.services.config import get_settings
 from app.voice.tts_service import get_tts_service
-from app.voice.whisper_service import get_whisper_service
 
 router = APIRouter(tags=["voice"])
-logger = logging.getLogger("athera.voice")
+logger = logging.getLogger("jarvis.voice")
 
 
 @router.post("/voice/input")
@@ -25,9 +24,11 @@ async def transcribe_voice(file: UploadFile = File(...)) -> dict:
         if not content:
             return {"text": ""}
         tmp_path.write_bytes(content)
+        from app.voice.whisper_service import get_whisper_service
+
         text = get_whisper_service().transcribe(tmp_path)
         return {"text": text}
-    except Exception as exc:
+    except Exception:
         logger.exception("Whisper transcription failed")
         return {
             "text": "Transcription unavailable. Install ffmpeg and ensure the Whisper model downloads successfully."
@@ -42,8 +43,13 @@ def synthesize_voice(payload: TTSIn) -> FileResponse:
     settings = get_settings()
     output_path = settings.audio_dir / f"reply-{uuid4()}.wav"
     try:
-        get_tts_service().synthesize(payload.text, output_path)
+        tts = get_tts_service()
+        if not tts.is_available():
+            raise HTTPException(status_code=503, detail="TTS unavailable (Piper not installed).")
+        tts.synthesize(payload.text, output_path)
         return FileResponse(path=output_path, media_type="audio/wav", filename=output_path.name)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=400, detail=f"TTS failed: {exc}") from exc

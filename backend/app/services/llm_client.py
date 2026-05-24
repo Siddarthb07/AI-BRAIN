@@ -5,6 +5,10 @@ import httpx
 from app.services.config import get_settings
 
 
+class LLMOfflineError(RuntimeError):
+    """Raised when no LLM backend is reachable."""
+
+
 class LLMClient:
     async def chat(self, messages: List[dict]) -> str:
         settings = get_settings()
@@ -19,13 +23,16 @@ class LLMClient:
             "model": settings.ollama_model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.2},
+            "options": {"temperature": 0.2, "num_predict": settings.llm_max_tokens},
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(f"{settings.ollama_url}/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("message", {}).get("content", "").strip()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=4.0)) as client:
+                resp = await client.post(f"{settings.ollama_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("message", {}).get("content", "").strip()
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            raise LLMOfflineError("No LLM backend available. Start Ollama or configure GROQ_API_KEY.") from exc
 
     async def _groq(self, messages: List[dict]) -> str:
         settings = get_settings()
@@ -38,13 +45,16 @@ class LLMClient:
             "stream": False,
         }
         headers = {"Authorization": f"Bearer {settings.groq_api_key}"}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{settings.groq_url}/chat/completions", json=payload, headers=headers
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=4.0)) as client:
+                resp = await client.post(
+                    f"{settings.groq_url}/chat/completions", json=payload, headers=headers
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            raise LLMOfflineError("No LLM backend available. Start Ollama or configure GROQ_API_KEY.") from exc
 
 
 llm_client = LLMClient()

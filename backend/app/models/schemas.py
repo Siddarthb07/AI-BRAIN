@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 class ContextIn(BaseModel):
     daily_goals: List[str] = Field(default_factory=list)
     active_project: str = ""
+    focus_repos: List[str] = Field(default_factory=list)
+    focus_topics: List[str] = Field(default_factory=list)
 
 
 class ContextOut(ContextIn):
@@ -14,11 +16,8 @@ class ContextOut(ContextIn):
 
 
 class GitHubIngestIn(BaseModel):
-    repo: str = Field(
-        ...,
-        description="GitHub repo in owner/repo form or full URL.",
-        examples=["owner/repo", "https://github.com/owner/repo"],
-    )
+    repo: Optional[str] = None
+    user: Optional[str] = None
 
 
 class IngestResult(BaseModel):
@@ -26,31 +25,6 @@ class IngestResult(BaseModel):
     items_indexed: int
     message: str
     meta: Dict[str, Any] = Field(default_factory=dict)
-
-
-class ExternalInsight(BaseModel):
-    id: str
-    source: str
-    title: str
-    summary: str
-    url: Optional[HttpUrl] = None
-    timestamp: datetime
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class RankedInsight(BaseModel):
-    id: str
-    source: str
-    title: str
-    summary: str
-    score: float
-    project_relevance: float
-    goal_alignment: float
-    recency: float
-    novelty: float
-    actionability: float
-    url: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BriefInsight(BaseModel):
@@ -65,8 +39,34 @@ class BriefOut(BaseModel):
     insights: List[BriefInsight]
 
 
+class InsightOut(BaseModel):
+    id: str
+    source: str
+    title: str
+    summary: str
+    url: Optional[str] = None
+    timestamp: str
+
+
 class ChatIn(BaseModel):
     message: str
+    include_context: bool = True
+    session_id: Optional[str] = None
+
+
+class ChatAction(BaseModel):
+    id: str
+    type: str
+    label: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+    requires_confirm: bool = True
+
+
+class ChatCitation(BaseModel):
+    id: int
+    path: str
+    snippet: str = ""
+    score: Optional[float] = None
 
 
 class ChatSource(BaseModel):
@@ -78,9 +78,19 @@ class ChatSource(BaseModel):
 
 class ChatOut(BaseModel):
     reply: str
+    session_id: Optional[str] = None
     sources: List[ChatSource] = Field(default_factory=list)
+    citations: List[ChatCitation] = Field(default_factory=list)
+    actions: List[ChatAction] = Field(default_factory=list)
+    context_used: bool = False
+    llm_offline: bool = False
+
+
+class VaultSaveIn(BaseModel):
+    content: str
+    title: Optional[str] = None
+    folder: str = "Chat"
 
 
 class TTSIn(BaseModel):
     text: str
-

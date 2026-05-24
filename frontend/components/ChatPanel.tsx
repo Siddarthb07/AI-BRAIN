@@ -1,21 +1,37 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { sendChat, synthesizeSpeech, transcribeAudio } from "../lib/api";
+import {
+  confirmChatAction,
+  getChatHistory,
+  saveChatToVault,
+  sendChat,
+  speakText,
+  transcribeAudio
+} from "../lib/api";
+
+type ChatAction = {
+  id: string;
+  type: string;
+  label: string;
+  requires_confirm?: boolean;
+};
 
 type Message = {
   role: "user" | "assistant";
   content: string;
+  citations?: Array<{ id: number; path: string; snippet?: string }>;
+  actions?: ChatAction[];
 };
 
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
   const [lastAssistant, setLastAssistant] = useState("");
 
@@ -23,6 +39,30 @@ export function ChatPanel() {
   const chunksRef = useRef<BlobPart[]>([]);
 
   const hasMessages = useMemo(() => messages.length > 0, [messages.length]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadHistory() {
+      try {
+        const data = await getChatHistory();
+        if (!mounted) return;
+        setSessionId(data.session_id || null);
+        const history = (data.history || []).map((m: Message & { meta?: { citations?: Message["citations"]; actions?: ChatAction[] } }) => ({
+          role: m.role,
+          content: m.content,
+          citations: m.meta?.citations,
+          actions: m.meta?.actions
+        }));
+        setMessages(history);
+      } catch {
+        // ignore
+      }
+    }
+    loadHistory();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function runChat(messageText: string, addUserMessage = true) {
     const text = messageText.trim();
@@ -36,21 +76,23 @@ export function ChatPanel() {
     setInput("");
 
     try {
-      const result = await sendChat(text);
-      setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
-      setLastAssistant(result.reply);
-      setStatus("Response received.");
-
-      if (voiceEnabled && result.reply.trim()) {
-        setStatus("Generating voice...");
-        const audio = await synthesizeSpeech(result.reply);
-        const url = URL.createObjectURL(audio);
-        if (audioUrl) {
-          URL.revokeObjectURL(audioUrl);
+      const result = await sendChat(text, sessionId || undefined);
+      if (result.session_id) setSessionId(result.session_id);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: result.reply,
+          citations: result.citations || [],
+          actions: result.actions || []
         }
-        setAudioUrl(url);
-        const player = new Audio(url);
-        player.play().catch(() => undefined);
+      ]);
+      setLastAssistant(result.reply);
+      setStatus(result.llm_offline ? "LLM offline — start Ollama." : "Response received.");
+
+      if (voiceEnabled && result.reply.trim() && !result.llm_offline) {
+        setStatus("Generating voice...");
+        await speakText(result.reply);
         setStatus("Voice playback ready.");
       }
     } catch (err) {
@@ -62,6 +104,19 @@ export function ChatPanel() {
         }
       ]);
       setStatus("Chat request failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onConfirmAction(action: ChatAction) {
+    setBusy(true);
+    setStatus(`Running: ${action.label}...`);
+    try {
+      const result = await confirmChatAction(action.id, sessionId || undefined);
+      setStatus(result.ok ? `Done: ${result.result || action.label}` : result.error || "Action failed");
+    } catch (err) {
+      setStatus(`Action failed: ${(err as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -133,10 +188,7 @@ export function ChatPanel() {
     }
     try {
       setStatus("Reading last reply...");
-      const audio = await synthesizeSpeech(lastAssistant);
-      const url = URL.createObjectURL(audio);
-      const player = new Audio(url);
-      player.play().catch(() => undefined);
+      await speakText(lastAssistant);
       setStatus("Reply readout started.");
     } catch (err) {
       setStatus(`Readout failed: ${(err as Error).message}`);
@@ -151,6 +203,47 @@ export function ChatPanel() {
           messages.map((msg, idx) => (
             <div key={`${msg.role}-${idx}`} className={`msg ${msg.role}`}>
               <p>{msg.content}</p>
+              {msg.role === "assistant" && msg.citations && msg.citations.length > 0 && (
+                <div className="row inline">
+                  {msg.citations.map((c) => (
+                    <span key={c.id} className="tag">
+                      [{c.id}] {c.path}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {msg.role === "assistant" && msg.actions && msg.actions.length > 0 && (
+                <div className="row inline">
+                  {msg.actions.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => onConfirmAction(action)}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {msg.role === "assistant" && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const saved = await saveChatToVault(msg.content, "JARVIS reply");
+                      setStatus(`Saved to ${saved.saved?.relative_path || "vault"}`);
+                    } catch (err) {
+                      setStatus(`Save failed: ${(err as Error).message}`);
+                    }
+                  }}
+                >
+                  Save to Vault
+                </button>
+              )}
             </div>
           ))
         ) : (
@@ -190,7 +283,6 @@ export function ChatPanel() {
         Speak assistant responses
       </label>
 
-      {audioUrl ? <audio controls src={audioUrl} /> : null}
       <p className="status">{status}</p>
     </section>
   );

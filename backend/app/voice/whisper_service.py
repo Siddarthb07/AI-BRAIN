@@ -25,3 +25,7 @@ class WhisperService:
 def get_whisper_service() -> WhisperService:
     return WhisperService()
 
+
+@lru_cache
+def get_whisper() -> WhisperService:
+    return get_whisper_service()

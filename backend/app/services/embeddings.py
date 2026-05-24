@@ -26,3 +26,7 @@ class EmbeddingService:
 def get_embedding_service() -> EmbeddingService:
     return EmbeddingService()
 
+
+@lru_cache
+def get_embedder() -> EmbeddingService:
+    return get_embedding_service()

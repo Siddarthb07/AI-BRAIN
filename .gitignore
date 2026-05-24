@@ -14,7 +14,10 @@ node_modules/
 
 # Data/artifacts
 backend/data/*.json
+backend/data/*.db
+backend/data/*.db-*
 backend/data/audio/*
+backend/data/test_vault*/
 !backend/data/.gitkeep
 
 # Infra volumes / secrets
