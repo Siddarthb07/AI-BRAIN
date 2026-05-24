@@ -17,25 +17,48 @@ const DEFAULT_GOOGLE_CALENDAR = {
   events: [],
 }
 
+const EMPTY_BRIEF = {
+  date: formatIstBriefLabel(),
+  greeting: 'Brief unavailable — connect LLM or sync vault.',
+  priority_actions: [],
+  insights: [],
+  hn_picks: [],
+  learning_goals: [],
+  voice_summary: '',
+  llm_available: false,
+  hn_stories: [],
+  calendar_connected: false,
+  calendar_events: [],
+  repos_count: 0,
+}
+
 export const useJarvisStore = create((set, get) => ({
   repos: [],
   brief: null,
   chatHistory: [],
+  chatSessions: [],
+  sessionId: null,
   hnStories: [],
   localDocs: [],
+  vaultNotes: [],
+  vaultStatus: null,
   selectedNode: null,
   isLoading: false,
   voiceState: 'idle',
   statusMsg: 'JARVIS ONLINE',
-  activePanel: 'brief',
+  activePanel: 'chat',
+  layoutMode: 'work',
   knowledgeDocs: 0,
+  healthState: { ollama: false, qdrant: false, vault_configured: false, demo_mode: false },
   googleCalendar: DEFAULT_GOOGLE_CALENDAR,
+  lastSaveToast: null,
 
   setRepos: (repos) => set({ repos }),
   setBrief: (brief) => set({ brief }),
   setSelectedNode: (node) => set({ selectedNode: node }),
   setVoiceState: (voiceState) => set({ voiceState }),
   setActivePanel: (activePanel) => set({ activePanel }),
+  setLayoutMode: (layoutMode) => set({ layoutMode }),
   setStatusMsg: (statusMsg) => set({ statusMsg }),
   setGoogleCalendar: (patch) =>
     set((state) => ({
@@ -50,26 +73,122 @@ export const useJarvisStore = create((set, get) => ({
     try {
       const res = await fetch(`${API}/health`, { cache: 'no-store' })
       if (!res.ok) throw new Error('health failed')
+      const data = await res.json()
 
       set((state) => {
-        const offlineLikeStatuses = new Set([
-          'OFFLINE MODE',
-          'BACKEND OFFLINE',
-          'BRIEF FALLBACK ACTIVE',
-        ])
-
+        const offlineLike = new Set(['OFFLINE MODE', 'BACKEND OFFLINE', 'BRIEF FALLBACK ACTIVE'])
         return {
+          healthState: {
+            ollama: Boolean(data.ollama),
+            qdrant: Boolean(data.qdrant),
+            vault_configured: Boolean(data.vault_configured),
+            demo_mode: Boolean(data.demo_mode),
+            vault_path: data.vault_path,
+          },
           statusMsg:
-            repairStatus && offlineLikeStatuses.has(state.statusMsg)
-              ? 'JARVIS ONLINE'
+            repairStatus && offlineLike.has(state.statusMsg)
+              ? data.ollama
+                ? 'JARVIS ONLINE'
+                : 'LLM OFFLINE — START OLLAMA'
               : state.statusMsg,
         }
       })
-
-      return true
+      return data
     } catch {
       if (!silent) set({ statusMsg: 'BACKEND OFFLINE' })
-      return false
+      return null
+    }
+  },
+
+  loadChatSession: async () => {
+    try {
+      const res = await fetch(`${API}/chat/history`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      const history = (data.history || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+        ts: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
+        citations: m.meta?.citations,
+        actions: m.meta?.actions,
+      }))
+      set({
+        sessionId: data.session_id,
+        chatSessions: data.sessions || [],
+        chatHistory: history,
+      })
+    } catch {}
+  },
+
+  fetchVaultStatus: async () => {
+    try {
+      const res = await fetch(`${API}/vault/status`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      set({ vaultStatus: data })
+      return data
+    } catch {}
+  },
+
+  fetchVaultNotes: async () => {
+    try {
+      const res = await fetch(`${API}/vault/notes?limit=40`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      set({ vaultNotes: data.notes || [] })
+      return data.notes
+    } catch {}
+  },
+
+  syncVault: async () => {
+    set({ statusMsg: 'SYNCING VAULT...' })
+    try {
+      const res = await fetch(`${API}/vault/sync`, { method: 'POST' })
+      const data = await res.json()
+      set({ statusMsg: `VAULT SYNCED — ${data.indexed_chunks || 0} chunks` })
+      await get().fetchVaultNotes()
+      await get().pollIngestStatus()
+      return data
+    } catch {
+      set({ statusMsg: 'VAULT SYNC FAILED' })
+    }
+  },
+
+  saveToVault: async (content, title) => {
+    try {
+      const res = await fetch(`${API}/chat/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, title: title || 'JARVIS note', folder: 'Chat' }),
+      })
+      const data = await res.json()
+      const path = data.saved?.relative_path || 'vault'
+      set({ lastSaveToast: path, statusMsg: `SAVED → ${path}` })
+      await get().fetchVaultNotes()
+      return data
+    } catch {
+      set({ statusMsg: 'VAULT SAVE FAILED' })
+    }
+  },
+
+  confirmAction: async (actionId) => {
+    const { sessionId } = get()
+    try {
+      const res = await fetch(`${API}/chat/action/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action_id: actionId, session_id: sessionId }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        set({ statusMsg: `ACTION OK — ${data.type}` })
+        await get().fetchVaultNotes()
+      } else {
+        set({ statusMsg: data.error || 'ACTION FAILED' })
+      }
+      return data
+    } catch {
+      set({ statusMsg: 'ACTION FAILED' })
     }
   },
 
@@ -88,12 +207,13 @@ export const useJarvisStore = create((set, get) => ({
           events: Array.isArray(data.calendar_events) ? data.calendar_events : state.googleCalendar.events,
           upcoming_count: Array.isArray(data.calendar_events) ? data.calendar_events.length : (state.googleCalendar.events || []).length,
         },
-        statusMsg: 'BRIEF READY',
+        statusMsg: data.llm_available === false ? 'BRIEF — LLM OFFLINE' : 'BRIEF READY',
       }))
+      await get().fetchVaultNotes()
       return data
     } catch {
-      set({ statusMsg: 'BRIEF FALLBACK ACTIVE', brief: FALLBACK_BRIEF })
-      return FALLBACK_BRIEF
+      set({ statusMsg: 'BRIEF UNAVAILABLE', brief: EMPTY_BRIEF })
+      return EMPTY_BRIEF
     } finally {
       set({ isLoading: false })
     }
@@ -106,12 +226,12 @@ export const useJarvisStore = create((set, get) => ({
       const data = await res.json()
       set({
         repos: data.repos || [],
-        statusMsg: `READING ${data.repo_count} REPOS AND FULL CODE CONTEXT`,
+        statusMsg: data.repos?.length ? `INDEXED ${data.repo_count || data.repos.length} REPOS` : 'NO REPOS FOUND — CONNECT GITHUB',
       })
       setTimeout(() => get().pollIngestStatus(), 3000)
       return data
     } catch {
-      set({ statusMsg: 'GITHUB OFFLINE - FALLBACK REPOS LOADED', repos: FALLBACK_REPOS })
+      set({ statusMsg: 'GITHUB INGEST FAILED', repos: [] })
     }
   },
 
@@ -122,14 +242,13 @@ export const useJarvisStore = create((set, get) => ({
       set({
         repos: data.repos || [],
         localDocs: data.local_docs || [],
-        knowledgeDocs: data.knowledge_docs,
-        statusMsg: `${data.repos_loaded} REPOS | ${(data.local_docs || []).length} LOCAL DOCS | ${data.knowledge_docs} KNOWLEDGE DOCS`,
+        knowledgeDocs: data.knowledge_docs || 0,
       })
     } catch {}
   },
 
   sendChat: async (message) => {
-    const { chatHistory } = get()
+    const { chatHistory, sessionId } = get()
     set({
       chatHistory: [...chatHistory, { role: 'user', content: message, ts: Date.now() }],
       statusMsg: 'THINKING...',
@@ -138,21 +257,33 @@ export const useJarvisStore = create((set, get) => ({
       const res = await fetch(`${API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, include_context: true }),
+        body: JSON.stringify({ message, include_context: true, session_id: sessionId }),
       })
       const data = await res.json()
+      const reply = data.reply || data.response || 'No response'
       set((state) => ({
-        chatHistory: [...state.chatHistory, { role: 'assistant', content: data.response, ts: Date.now() }],
-        statusMsg: 'READY',
+        sessionId: data.session_id || state.sessionId,
+        chatHistory: [
+          ...state.chatHistory,
+          {
+            role: 'assistant',
+            content: reply,
+            ts: Date.now(),
+            citations: data.citations || [],
+            actions: data.actions || [],
+            llm_offline: data.llm_offline,
+          },
+        ],
+        statusMsg: data.llm_offline ? 'LLM OFFLINE' : 'READY',
       }))
-      return data.response
+      return reply
     } catch {
-      const fallback = 'Operating in offline mode. Focus on your highest-priority task and ship something today.'
+      const err = 'Backend unreachable. Start the API on port 8001.'
       set((state) => ({
-        chatHistory: [...state.chatHistory, { role: 'assistant', content: fallback, ts: Date.now() }],
-        statusMsg: 'OFFLINE MODE',
+        chatHistory: [...state.chatHistory, { role: 'assistant', content: err, ts: Date.now(), llm_offline: true }],
+        statusMsg: 'BACKEND OFFLINE',
       }))
-      return fallback
+      return err
     }
   },
 
@@ -160,7 +291,7 @@ export const useJarvisStore = create((set, get) => ({
     try {
       const res = await fetch(`${API}/ingest/external`, { cache: 'no-store' })
       const data = await res.json()
-      set({ hnStories: data.top || [], statusMsg: 'HN SIGNALS UPDATED' })
+      set({ hnStories: data.top || [] })
     } catch {}
   },
 
@@ -177,13 +308,7 @@ export const useJarvisStore = create((set, get) => ({
           events: data.events || [],
           upcoming_count: data.upcoming_count ?? (data.events || []).length,
         },
-        statusMsg: silent
-          ? state.statusMsg
-          : data.connected
-            ? 'GOOGLE CALENDAR READY'
-            : data.configured
-              ? 'GOOGLE CALENDAR DISCONNECTED'
-              : 'GOOGLE CALENDAR SETUP REQUIRED',
+        statusMsg: silent ? state.statusMsg : data.connected ? 'GOOGLE CALENDAR READY' : 'CALENDAR BETA',
       }))
       return data
     } catch (error) {
@@ -204,75 +329,24 @@ export const useJarvisStore = create((set, get) => ({
       if (!res.ok) throw new Error('calendar sync failed')
       const data = await res.json()
       set((state) => ({
-        googleCalendar: {
-          ...state.googleCalendar,
-          ...data,
-          events: data.events || [],
-          upcoming_count: data.upcoming_count ?? (data.events || []).length,
-        },
+        googleCalendar: { ...state.googleCalendar, ...data, events: data.events || [] },
         statusMsg: 'GOOGLE CALENDAR SYNCED',
       }))
       await get().fetchBrief()
       return data
     } catch (error) {
-      set((state) => ({
-        googleCalendar: {
-          ...state.googleCalendar,
-          last_error: error.message,
-        },
-        statusMsg: 'GOOGLE CALENDAR SYNC FAILED',
-      }))
+      set({ statusMsg: 'GOOGLE CALENDAR SYNC FAILED' })
       throw error
     }
   },
 
   disconnectGoogleCalendar: async () => {
-    set({ statusMsg: 'DISCONNECTING GOOGLE CALENDAR...' })
     try {
       await fetch(`${API}/calendar/google/disconnect`, { method: 'DELETE' })
-      set({
-        googleCalendar: DEFAULT_GOOGLE_CALENDAR,
-        statusMsg: 'GOOGLE CALENDAR DISCONNECTED',
-      })
+      set({ googleCalendar: DEFAULT_GOOGLE_CALENDAR, statusMsg: 'GOOGLE CALENDAR DISCONNECTED' })
       await get().fetchBrief()
     } catch {
       set({ statusMsg: 'GOOGLE CALENDAR DISCONNECT FAILED' })
     }
   },
 }))
-
-const FALLBACK_BRIEF = {
-  date: formatIstBriefLabel(),
-  greeting: 'Good morning. Operating in offline mode.',
-  priority_actions: [
-    'Ship your top priority task today',
-    'Review and close stale pull requests',
-    'Protect a 30 minute learning block',
-    'Update documentation before switching tasks',
-  ],
-  insights: [
-    'Local-first AI gives you full data sovereignty.',
-    'Ship small and iterate fast so momentum compounds.',
-    'Your stack is production-ready. Trust it and move.',
-  ],
-  hn_picks: [
-    'Local AI tooling is maturing rapidly',
-    'RAG plus vector search is the new standard',
-  ],
-  learning_goals: ['RAG optimization', 'Vector DB tuning', 'FastAPI async patterns'],
-  voice_summary:
-    'JARVIS online. Offline mode active. Focus on shipping your highest-priority task and protect one deep work block today.',
-  active_project: 'JARVIS AI Brain',
-  repos_count: 5,
-  hn_stories: [],
-  calendar_connected: false,
-  calendar_events: [],
-}
-
-const FALLBACK_REPOS = [
-  { name: 'lexprobe', language: 'Python', topics: ['ai', 'legal', 'rag'], description: 'Legal AI', patterns: ['REST API', 'RAG', 'Vector DB'] },
-  { name: 'health-ai', language: 'Python', topics: ['health', 'ml'], description: 'Clinical AI', patterns: ['Database'] },
-  { name: 'geoquant', language: 'Python', topics: ['finance', 'trading'], description: 'Finance AI', patterns: ['REST API'] },
-  { name: 'drone-sim', language: 'Python', topics: ['physics', 'simulation'], description: 'Drone Sim', patterns: [] },
-  { name: 'athera', language: 'TypeScript', topics: ['automation', 'ai'], description: 'Workflow AI', patterns: ['React/Next.js', 'Docker'] },
-]

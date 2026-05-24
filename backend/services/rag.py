@@ -108,15 +108,32 @@ def get_context_string(results: List[Dict], max_chars: int = 2000) -> str:
         return ""
     parts = []
     total = 0
-    for r in results:
+    for i, r in enumerate(results, start=1):
         text = r.get("text", "")
         meta = r.get("metadata", {})
-        chunk = f"[{meta.get('source', 'doc')}] {text}"
+        path = meta.get("path") or meta.get("source") or meta.get("title") or "doc"
+        chunk = f"[{i}] ({path}) {text}"
         if total + len(chunk) > max_chars:
             break
         parts.append(chunk)
         total += len(chunk)
     return "\n---\n".join(parts)
+
+
+def format_citations(results: List[Dict]) -> List[Dict]:
+    citations = []
+    for i, r in enumerate(results, start=1):
+        meta = r.get("metadata", {})
+        path = meta.get("path") or meta.get("source") or meta.get("title") or "unknown"
+        citations.append(
+            {
+                "id": i,
+                "path": path,
+                "snippet": (r.get("text") or "")[:200],
+                "score": r.get("score"),
+            }
+        )
+    return citations
 
 def _local_label(metadata: Dict) -> str:
     if metadata.get("title"):

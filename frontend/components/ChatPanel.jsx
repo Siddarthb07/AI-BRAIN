@@ -164,9 +164,11 @@ function downloadChatContent(content, ts) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function ChatBubble({ msg }) {
+function ChatBubble({ msg, onSave }) {
   const isUser = msg.role === 'user'
   const time = formatIstTime(msg.ts)
+  const saveToVault = useJarvisStore((s) => s.saveToVault)
+  const confirmAction = useJarvisStore((s) => s.confirmAction)
   const [showInline, setShowInline] = useState(false)
   const downloadable = !isUser && shouldOfferDownload(msg.content)
   const preview = downloadable ? createCompactPreview(msg.content) : ''
@@ -273,6 +275,27 @@ function ChatBubble({ msg }) {
           </div>
         ) : (
           msg.content
+        )}
+        {!isUser && msg.citations?.length > 0 && (
+          <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {msg.citations.map((c) => (
+              <span key={c.id} className="tag" title={c.snippet}>
+                [{c.id}] {c.path}
+              </span>
+            ))}
+          </div>
+        )}
+        {!isUser && (
+          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-gold" style={{ fontSize: '10px' }} onClick={() => saveToVault(msg.content, 'JARVIS reply')}>
+              SAVE TO VAULT
+            </button>
+            {(msg.actions || []).map((a) => (
+              <button key={a.id} type="button" className="btn" style={{ fontSize: '10px' }} onClick={() => confirmAction(a.id)}>
+                {a.label}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>

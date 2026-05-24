@@ -1,93 +1,117 @@
-from datetime import datetime
-from typing import List
+import json
+from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services import google_calendar, llm, rag, store
+from services import chat_history, jarvis_orchestrator, vault
 
 router = APIRouter()
-
-SYSTEM_PROMPT = """You are JARVIS, an elite AI assistant embedded in a developer's brain interface.
-You have access to repository context, today's tech signals, and the user's current goals and schedule.
-Be concise, sharp, technically precise, and actionable.
-Think like a senior engineer and strategic advisor combined.
-Use calendar context when it affects prioritization, timing, or tradeoffs.
-Speak in first person as JARVIS. Keep responses under 200 words unless asked for detail."""
-
-_history: List[dict] = []
 
 
 class ChatMessage(BaseModel):
     message: str
     include_context: bool = True
-    reset_history: bool = False
+    session_id: Optional[str] = None
+
+
+class SaveChatRequest(BaseModel):
+    content: str
+    title: Optional[str] = None
+    folder: str = "Chat"
+
+
+class ConfirmActionRequest(BaseModel):
+    action_id: str
+    session_id: Optional[str] = None
+
+
+@router.get("/stream")
+async def chat_stream(message: str, session_id: Optional[str] = None):
+    """SSE streaming stub — streams full reply when Ollama available."""
+
+    async def event_gen():
+        result = await jarvis_orchestrator.run_chat(message, session_id=session_id)
+        yield f"data: {{\"type\":\"token\",\"text\":{json.dumps(result['reply'])}}}\n\n"
+        yield f"data: {{\"type\":\"done\",\"session_id\":{json.dumps(result['session_id'])}}}\n\n"
+
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 @router.post("")
 async def chat(payload: ChatMessage):
-    global _history
-
-    if payload.reset_history:
-        _history = []
-
-    context_str = ""
-    sources_used = 0
-    if payload.include_context:
-        results = await rag.search(payload.message, top_k=3)
-        rag_context = rag.get_context_string(results)
-        sources_used = len(results)
-
-        ctx = store.get_context()
-        repos = store.get_repos()
-        repo_names = ", ".join(repo["name"] for repo in repos[:8]) if repos else "none indexed yet"
-
-        calendar_context = ""
-        if google_calendar.is_connected():
-            try:
-                events = await google_calendar.get_upcoming_events(force_refresh=False, max_results=4)
-                event_lines = google_calendar.events_to_context(events, limit=4)
-                if event_lines:
-                    calendar_context = f"Upcoming schedule:\n{event_lines}\n\n"
-            except Exception as exc:
-                print(f"[Chat] Calendar sync failed: {exc}")
-
-        context_str = (
-            f"Developer context: Active project={ctx.get('active_project', 'unknown')}, "
-            f"Goals={', '.join(ctx.get('daily_goals', []))}, "
-            f"Repos={repo_names}\n\n"
-        )
-        context_str += calendar_context
-        if rag_context:
-            context_str += f"Relevant knowledge:\n{rag_context}"
-
-    response = await llm.chat_completion(
-        prompt=payload.message,
-        system=SYSTEM_PROMPT,
-        context=context_str,
+    return await jarvis_orchestrator.run_chat(
+        payload.message,
+        session_id=payload.session_id,
+        include_context=payload.include_context,
     )
 
-    _history.append({"role": "user", "content": payload.message, "timestamp": datetime.now().isoformat()})
-    _history.append({"role": "assistant", "content": response, "timestamp": datetime.now().isoformat()})
 
-    if len(_history) > 20:
-        _history = _history[-20:]
+@router.post("/save")
+async def save_message(payload: SaveChatRequest):
+    if not payload.content.strip():
+        raise HTTPException(400, "Content is empty")
+    saved = vault.save_markdown(
+        payload.content,
+        title=payload.title,
+        folder=payload.folder,
+        source="jarvis-chat",
+    )
+    return {"saved": saved}
 
+
+@router.post("/action/confirm")
+async def confirm_action(payload: ConfirmActionRequest):
+    return await jarvis_orchestrator.confirm_action(payload.action_id, payload.session_id)
+
+
+@router.get("/sessions")
+async def list_sessions():
+    return {"sessions": chat_history.list_sessions()}
+
+
+@router.post("/sessions")
+async def create_session(title: str = "New chat"):
+    return chat_history.create_session(title)
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_messages(session_id: str):
+    if not chat_history.get_session(session_id):
+        raise HTTPException(404, "Session not found")
     return {
-        "response": response,
-        "sources": sources_used,
-        "context_used": bool(context_str),
-        "timestamp": datetime.now().isoformat(),
+        "session": chat_history.get_session(session_id),
+        "messages": chat_history.get_messages(session_id),
     }
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    if not chat_history.delete_session(session_id):
+        raise HTTPException(404, "Session not found")
+    return {"status": "deleted"}
+
+
 @router.get("/history")
-async def get_history():
-    return {"history": _history, "count": len(_history)}
+async def get_history(session_id: Optional[str] = None):
+    if session_id:
+        return {"history": chat_history.get_messages(session_id), "session_id": session_id}
+    sessions = chat_history.list_sessions()
+    if not sessions:
+        sid = chat_history.create_session()["id"]
+        return {"history": [], "session_id": sid, "sessions": [chat_history.get_session(sid)]}
+    sid = sessions[0]["id"]
+    return {
+        "history": chat_history.get_messages(sid),
+        "session_id": sid,
+        "sessions": sessions,
+    }
 
 
 @router.delete("/history")
-async def clear_history():
-    global _history
-    _history = []
+async def clear_history(session_id: Optional[str] = None):
+    if session_id:
+        chat_history.delete_session(session_id)
     return {"status": "cleared"}

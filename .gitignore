@@ -15,11 +15,12 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.pytest_cache/
+*.egg-info/
 
-# Local data and generated files
+# Local runtime data (not source)
 backend/data/
-frontend/{app,components,public}/
-backend/{routers,services,data}/
+!backend/data/.gitkeep
 
 # OS / editor
 .DS_Store

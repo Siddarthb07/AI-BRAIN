@@ -8,6 +8,8 @@ export default function HUD() {
   const voiceState = useJarvisStore((state) => state.voiceState)
   const ingestGitHub = useJarvisStore((state) => state.ingestGitHub)
   const fetchExternal = useJarvisStore((state) => state.fetchExternal)
+  const healthState = useJarvisStore((state) => state.healthState)
+  const vaultStatus = useJarvisStore((state) => state.vaultStatus)
   const googleCalendar = useJarvisStore((state) => state.googleCalendar)
   const setActivePanel = useJarvisStore((state) => state.setActivePanel)
   const [username, setUsername] = useState('')
@@ -76,7 +78,7 @@ export default function HUD() {
             JARVIS
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>
-            AI BRAIN v1.0
+            AI BRAIN v1.0.1
           </div>
         </div>
       </div>
@@ -98,6 +100,24 @@ export default function HUD() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+        {[
+          { label: 'OLLAMA', ok: healthState?.ollama },
+          { label: 'QDRANT', ok: healthState?.qdrant },
+          { label: 'VAULT', ok: Boolean(vaultStatus?.vault_path) },
+        ].map((item) => (
+          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: item.ok ? 'var(--green)' : 'var(--red)',
+              }}
+            />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>{item.label}</span>
+          </div>
+        ))}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <div
             style={{

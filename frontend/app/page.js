@@ -1,53 +1,98 @@
 'use client'
-import { useEffect, Suspense, lazy } from 'react'
+
+import { Suspense, lazy, useEffect } from 'react'
 import { useJarvisStore } from './store'
 import HUD from '../components/HUD'
-import BriefPanel from '../components/BriefPanel'
-import CalendarPanel from '../components/CalendarPanel'
+import AppShell from '../components/shell/AppShell'
 import ChatPanel from '../components/ChatPanel'
+import BriefPanel from '../components/BriefPanel'
+import VaultPanel from '../components/vault/VaultPanel'
+import CalendarPanel from '../components/CalendarPanel'
 import VoicePanel from '../components/VoicePanel'
 import StudioPanel from '../components/StudioPanel'
-import NodePanel from '../components/NodePanel'
 import LocalIngestPanel from '../components/LocalIngestPanel'
+import NodePanel from '../components/NodePanel'
 
 const BrainGraph = lazy(() => import('../components/BrainGraph'))
 
-const TABS = [
-  { id: 'brief', label: 'BRIEF', icon: '[ ]' },
-  { id: 'calendar', label: 'CAL', icon: '[@]' },
-  { id: 'chat', label: 'CHAT', icon: '( )' },
-  { id: 'voice', label: 'VOICE', icon: '<>' },
-  { id: 'studio', label: 'STUDIO', icon: '{ }' },
-  { id: 'ingest', label: 'INGEST', icon: '^^' },
-  { id: 'nodes', label: 'NODES', icon: '<#>' },
+const RAIL = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'brief', label: 'Brief' },
+  { id: 'vault', label: 'Vault' },
+  { id: 'calendar', label: 'Cal' },
+  { id: 'ingest', label: 'Ingest' },
+  { id: 'voice', label: 'Voice' },
+  { id: 'graph', label: 'Graph' },
 ]
 
-function TabBar({ active, onSelect }) {
+function ThreadSidebar() {
+  const chatSessions = useJarvisStore((s) => s.chatSessions)
+  const sessionId = useJarvisStore((s) => s.sessionId)
+  const loadChatSession = useJarvisStore((s) => s.loadChatSession)
+
   return (
-    <div style={{ display: 'flex', borderBottom: '1px solid rgba(0,200,255,0.1)', background: 'rgba(0,4,8,0.5)', flexShrink: 0 }}>
-      {TABS.map((tab) => (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '10px' }}>
+      <div className="section-header" style={{ marginBottom: '8px' }}>
+        THREADS
+      </div>
+      <button type="button" className="btn" style={{ fontSize: '10px', marginBottom: '10px' }} onClick={() => loadChatSession()}>
+        + REFRESH
+      </button>
+      <div className="scroll-area" style={{ flex: 1 }}>
+        {(chatSessions.length ? chatSessions : [{ id: sessionId, title: 'Current' }]).map((s) => (
+          <div
+            key={s.id || 'current'}
+            style={{
+              padding: '8px',
+              marginBottom: '4px',
+              borderRadius: '4px',
+              background: s.id === sessionId ? 'rgba(0,200,255,0.08)' : 'transparent',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {s.title || 'Chat'}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function IconRail({ active, onSelect }) {
+  return (
+    <div
+      style={{
+        width: 56,
+        flexShrink: 0,
+        borderRight: '1px solid rgba(0,200,255,0.1)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        paddingTop: '8px',
+        gap: '4px',
+        background: 'rgba(0,4,8,0.6)',
+      }}
+    >
+      {RAIL.map((tab) => (
         <button
           key={tab.id}
+          type="button"
           onClick={() => onSelect(tab.id)}
           style={{
-            flex: 1,
-            padding: '11px 6px',
-            background: active === tab.id ? 'rgba(0,200,255,0.08)' : 'transparent',
+            width: 44,
+            padding: '8px 4px',
             border: 'none',
-            borderBottom: active === tab.id ? '2px solid var(--cyan)' : '2px solid transparent',
-            color: active === tab.id ? 'var(--cyan)' : 'var(--text-dim)',
-            fontFamily: 'var(--font-display)',
-            fontSize: '8px',
-            letterSpacing: '0.1em',
+            borderRadius: '4px',
             cursor: 'pointer',
-            transition: 'all 0.2s',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '2px',
+            background: active === tab.id ? 'rgba(0,200,255,0.12)' : 'transparent',
+            color: active === tab.id ? 'var(--cyan)' : 'var(--text-dim)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '8px',
+            letterSpacing: '0.06em',
           }}
         >
-          <span style={{ fontSize: '13px' }}>{tab.icon}</span>
           {tab.label}
         </button>
       ))}
@@ -57,206 +102,144 @@ function TabBar({ active, onSelect }) {
 
 function BrainLoading() {
   return (
-    <div
-      style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '16px',
-      }}
-    >
-      <div
-        style={{
-          width: '72px',
-          height: '72px',
-          border: '1px solid rgba(0,200,255,0.2)',
-          borderTop: '1px solid var(--cyan)',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-        }}
-      />
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.15em' }}>
-        BUILDING NEURAL GRAPH...
-      </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  )
-}
-
-function BrainHUD({ repos, hnStories, knowledgeDocs, selectedNode }) {
-  const stats = [
-    { label: 'NEURONS', value: repos.length || '-' },
-    { label: 'SIGNALS', value: hnStories.length || '-' },
-    { label: 'KNOWLEDGE', value: knowledgeDocs || '-' },
-    { label: 'SELECTED', value: selectedNode?.label?.slice(0, 10) || 'NONE' },
-  ]
-
-  return (
-    <div style={{ position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '24px', pointerEvents: 'none', zIndex: 10 }}>
-      {stats.map((stat) => (
-        <div key={stat.label} style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.1em' }}>
-          <div style={{ color: 'var(--text-dim)', marginBottom: '2px' }}>{stat.label}</div>
-          <div style={{ color: 'var(--cyan)', fontSize: '14px', fontFamily: 'var(--font-display)', textShadow: '0 0 8px var(--cyan)' }}>
-            {stat.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function Legend() {
-  const items = [
-    { color: '#00ff9f', label: 'REPO' },
-    { color: '#f0b429', label: 'PATTERN' },
-    { color: '#fb923c', label: 'TOPIC' },
-    { color: '#a78bfa', label: 'LANG' },
-    { color: '#f472b6', label: 'NEWS' },
-    { color: '#38bdf8', label: 'TEXT' },
-    { color: '#ff8a3d', label: 'PDF' },
-  ]
-
-  return (
-    <div style={{ position: 'absolute', top: '30px', left: '20px', display: 'flex', flexDirection: 'column', gap: '5px', pointerEvents: 'none', zIndex: 10 }}>
-      {items.map((item) => (
-        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: item.color, boxShadow: `0 0 5px ${item.color}` }} />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'rgba(180,220,255,0.4)', letterSpacing: '0.08em' }}>
-            {item.label}
-          </span>
-        </div>
-      ))}
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+      Loading knowledge map...
     </div>
   )
 }
 
 export default function Page() {
-  const activePanel = useJarvisStore((state) => state.activePanel)
-  const setActivePanel = useJarvisStore((state) => state.setActivePanel)
-  const repos = useJarvisStore((state) => state.repos)
-  const hnStories = useJarvisStore((state) => state.hnStories)
-  const selectedNode = useJarvisStore((state) => state.selectedNode)
-  const knowledgeDocs = useJarvisStore((state) => state.knowledgeDocs)
-  const fetchBrief = useJarvisStore((state) => state.fetchBrief)
-  const fetchExternal = useJarvisStore((state) => state.fetchExternal)
-  const fetchGoogleCalendarStatus = useJarvisStore((state) => state.fetchGoogleCalendarStatus)
-  const pollIngestStatus = useJarvisStore((state) => state.pollIngestStatus)
-  const checkBackendHealth = useJarvisStore((state) => state.checkBackendHealth)
-  const setStatusMsg = useJarvisStore((state) => state.setStatusMsg)
+  const activePanel = useJarvisStore((s) => s.activePanel)
+  const setActivePanel = useJarvisStore((s) => s.setActivePanel)
+  const layoutMode = useJarvisStore((s) => s.layoutMode)
+  const setLayoutMode = useJarvisStore((s) => s.setLayoutMode)
+  const repos = useJarvisStore((s) => s.repos)
+  const knowledgeDocs = useJarvisStore((s) => s.knowledgeDocs)
+  const vaultNotes = useJarvisStore((s) => s.vaultNotes)
+  const healthState = useJarvisStore((s) => s.healthState)
+  const fetchBrief = useJarvisStore((s) => s.fetchBrief)
+  const fetchExternal = useJarvisStore((s) => s.fetchExternal)
+  const fetchGoogleCalendarStatus = useJarvisStore((s) => s.fetchGoogleCalendarStatus)
+  const pollIngestStatus = useJarvisStore((s) => s.pollIngestStatus)
+  const checkBackendHealth = useJarvisStore((s) => s.checkBackendHealth)
+  const loadChatSession = useJarvisStore((s) => s.loadChatSession)
+  const fetchVaultNotes = useJarvisStore((s) => s.fetchVaultNotes)
+  const fetchVaultStatus = useJarvisStore((s) => s.fetchVaultStatus)
+
+  const nodeCount = (repos?.length || 0) + (vaultNotes?.length || 0) + (knowledgeDocs || 0)
+  const showMiniMap = nodeCount > 0 && activePanel !== 'graph'
 
   useEffect(() => {
     checkBackendHealth({ silent: true, repairStatus: true })
+    loadChatSession()
+    fetchVaultStatus()
+    fetchVaultNotes()
     fetchBrief()
     fetchExternal()
     fetchGoogleCalendarStatus({ silent: true })
     pollIngestStatus()
-    const ingestInterval = setInterval(pollIngestStatus, 10000)
-    const healthInterval = setInterval(() => {
-      checkBackendHealth({ silent: true, repairStatus: true })
-    }, 15000)
-
+    const t1 = setInterval(pollIngestStatus, 15000)
+    const t2 = setInterval(() => checkBackendHealth({ silent: true }), 20000)
     return () => {
-      clearInterval(ingestInterval)
-      clearInterval(healthInterval)
+      clearInterval(t1)
+      clearInterval(t2)
     }
-  }, [checkBackendHealth, fetchBrief, fetchExternal, fetchGoogleCalendarStatus, pollIngestStatus])
+  }, [
+    checkBackendHealth,
+    fetchBrief,
+    fetchExternal,
+    fetchGoogleCalendarStatus,
+    fetchVaultNotes,
+    fetchVaultStatus,
+    loadChatSession,
+    pollIngestStatus,
+  ])
 
-  useEffect(() => {
-    if (selectedNode) setActivePanel('nodes')
-  }, [selectedNode])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const url = new URL(window.location.href)
-    const calendarStatus = url.searchParams.get('calendar_status')
-
-    if (!calendarStatus) return
-
-    setActivePanel('calendar')
-    if (calendarStatus === 'connected') {
-      setStatusMsg('GOOGLE CALENDAR CONNECTED')
-      fetchGoogleCalendarStatus({ silent: true })
-      fetchBrief()
+  const onRailSelect = (id) => {
+    if (id === 'graph') {
+      setLayoutMode('graph')
+      setActivePanel('graph')
     } else {
-      setStatusMsg('GOOGLE CALENDAR CONNECT FAILED')
-      fetchGoogleCalendarStatus({ silent: true })
+      setLayoutMode('work')
+      setActivePanel(id)
     }
+  }
 
-    url.searchParams.delete('calendar_status')
-    url.searchParams.delete('calendar_error')
-    const nextUrl = `${url.pathname}${url.search}${url.hash}`
-    window.history.replaceState({}, '', nextUrl)
-  }, [fetchBrief, fetchGoogleCalendarStatus, setActivePanel, setStatusMsg])
-
-  const renderPanel = () => {
+  const renderMain = () => {
     switch (activePanel) {
       case 'brief':
         return <BriefPanel />
+      case 'vault':
+        return <VaultPanel />
       case 'calendar':
         return <CalendarPanel />
-      case 'chat':
-        return <ChatPanel />
       case 'voice':
         return <VoicePanel />
-      case 'studio':
-        return <StudioPanel />
       case 'ingest':
         return <LocalIngestPanel />
-      case 'nodes':
-        return <NodePanel />
+      case 'graph':
+        return (
+          <Suspense fallback={<BrainLoading />}>
+            <BrainGraph />
+          </Suspense>
+        )
+      case 'chat':
       default:
-        return <BriefPanel />
+        return <ChatPanel />
     }
+  }
+
+  const rightPanel =
+    activePanel === 'chat' ? (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderBottom: '1px solid rgba(0,200,255,0.08)' }}>
+          <BriefPanel />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <VaultPanel />
+        </div>
+      </div>
+    ) : null
+
+  if (layoutMode === 'graph' || activePanel === 'graph') {
+    return (
+      <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)' }}>
+        <HUD />
+        <div style={{ flex: 1, marginTop: 52, display: 'flex', minHeight: 0 }}>
+          <IconRail active="graph" onSelect={onRailSelect} />
+          <div style={{ flex: 1, position: 'relative' }}>
+            <Suspense fallback={<BrainLoading />}>
+              <BrainGraph />
+            </Suspense>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)', overflow: 'hidden' }}>
       <HUD />
-      <div className="app-main" style={{ flex: 1, display: 'flex', marginTop: '52px', minHeight: 0 }}>
-        <div className="brain-container" style={{ flex: 1, position: 'relative', minWidth: 0, background: 'radial-gradient(ellipse at 45% 50%, #00121e 0%, #000408 70%)' }}>
-          {[
-            { top: '16px', left: '16px', borderWidth: '1px 0 0 1px' },
-            { top: '16px', right: '16px', borderWidth: '1px 1px 0 0' },
-            { bottom: '16px', left: '16px', borderWidth: '0 0 1px 1px' },
-            { bottom: '16px', right: '16px', borderWidth: '0 1px 1px 0' },
-          ].map((style, index) => (
-            <div
-              key={index}
-              style={{
-                position: 'absolute',
-                ...style,
-                width: '18px',
-                height: '18px',
-                borderColor: 'rgba(0,200,255,0.18)',
-                borderStyle: 'solid',
-                zIndex: 10,
-                pointerEvents: 'none',
-              }}
-            />
-          ))}
-
-          <Legend />
-
-          <Suspense fallback={<BrainLoading />}>
-            <BrainGraph />
-          </Suspense>
-
-          <BrainHUD repos={repos} hnStories={hnStories} knowledgeDocs={knowledgeDocs} selectedNode={selectedNode} />
-
-          <div style={{ position: 'absolute', top: '24px', left: '50%', transform: 'translateX(-50%)', fontFamily: 'var(--font-display)', fontSize: '8px', color: 'rgba(0,200,255,0.2)', letterSpacing: '0.3em', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 10 }}>
-            NEURAL KNOWLEDGE GRAPH - ORGANIC BRAIN INTERFACE
-          </div>
+      {healthState.demo_mode ? (
+        <div style={{ marginTop: 52, background: 'rgba(240,180,41,0.15)', color: 'var(--gold)', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px' }}>
+          DEMO MODE — sample data may appear
         </div>
-
-        <div className="panel side-panel-shell" style={{ flexShrink: 0, borderRadius: 0, borderTop: 'none', borderRight: 'none', borderBottom: 'none', display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <TabBar active={activePanel} onSelect={setActivePanel} />
-          <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-            {renderPanel()}
-          </div>
+      ) : null}
+      {!healthState.ollama && !healthState.demo_mode ? (
+        <div style={{ background: 'rgba(255,56,96,0.12)', color: 'var(--red)', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px', marginTop: healthState.demo_mode ? 0 : 52 }}>
+          Ollama offline — start Ollama for LLM replies
+        </div>
+      ) : null}
+      <div style={{ flex: 1, display: 'flex', marginTop: healthState.demo_mode || !healthState.ollama ? 0 : 52, minHeight: 0 }}>
+        <IconRail active={activePanel} onSelect={onRailSelect} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <AppShell sidebar={activePanel === 'chat' ? <ThreadSidebar /> : null} rightPanel={rightPanel} miniMap={showMiniMap ? (
+            <Suspense fallback={<BrainLoading />}>
+              <BrainGraph />
+            </Suspense>
+          ) : null}>
+            {renderMain()}
+          </AppShell>
         </div>
       </div>
     </div>

@@ -4,6 +4,8 @@ import re
 from fastapi import APIRouter
 
 from services import google_calendar, hn as hn_service, llm, store, time_utils
+from services.config import demo_mode
+from services.llm import LLMOfflineError
 
 router = APIRouter()
 
@@ -100,6 +102,7 @@ Only output valid JSON."""
 
     brief_data = dict(FALLBACK_BRIEF)
     brief_data["date"] = _today_label()
+    brief_data["llm_available"] = True
 
     try:
         response = await llm.chat_completion(prompt, system="You are JARVIS. Return only valid JSON.")
@@ -107,8 +110,21 @@ Only output valid JSON."""
         parsed = json.loads(clean)
         brief_data.update(parsed)
         brief_data["date"] = _today_label()
+    except LLMOfflineError:
+        brief_data["llm_available"] = False
+        brief_data["greeting"] = "JARVIS brief unavailable — LLM offline."
+        brief_data["priority_actions"] = ["Start Ollama or set GROQ_API_KEY", "Sync your vault", "Review today's calendar"]
+        brief_data["insights"] = []
+        brief_data["hn_picks"] = []
+        brief_data["voice_summary"] = "LLM offline. Connect Ollama to generate your brief."
     except Exception as exc:
         print(f"[Brief] LLM parse failed: {exc}")
+        if not demo_mode():
+            brief_data["llm_available"] = False
+            brief_data["greeting"] = "Brief generation failed — check LLM connection."
+            brief_data["priority_actions"] = ["Verify Ollama is running"]
+            brief_data["insights"] = []
+            brief_data["hn_picks"] = []
 
     _apply_calendar_fallback(brief_data, calendar_events)
 
@@ -126,6 +142,24 @@ Only output valid JSON."""
     brief_data["calendar_events"] = calendar_events
 
     store.set_brief_cache(brief_data)
+
+    # Persist brief to vault when LLM available or demo content exists
+    try:
+        from services import jarvis_orchestrator
+
+        md = jarvis_orchestrator._brief_to_markdown(brief_data)
+        from services import vault as vault_svc
+
+        vault_svc.save_markdown(
+            md,
+            title=f"Brief {brief_data.get('date', '')}",
+            folder="Briefs",
+            source="jarvis-brief",
+            extra_frontmatter={"llm_available": str(brief_data.get("llm_available", False))},
+        )
+    except Exception as exc:
+        print(f"[Brief] Vault save failed: {exc}")
+
     return brief_data
 
 

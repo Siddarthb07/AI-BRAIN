@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -8,7 +9,7 @@ def now_ist() -> datetime:
     return datetime.now(IST)
 
 
-def format_ist_brief_label(value: datetime | None = None) -> str:
+def format_ist_brief_label(value: Optional[datetime] = None) -> str:
     current = value.astimezone(IST) if value else now_ist()
     return current.strftime("%A, %B %d %Y %I:%M %p IST")
 

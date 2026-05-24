@@ -2,6 +2,8 @@ import os
 import httpx
 from typing import List, Dict, Optional
 
+from services.config import demo_mode
+
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 FALLBACK_REPOS = [
@@ -67,10 +69,10 @@ async def fetch_user_repos(username: str) -> List[Dict]:
                             "owner": username,
                         })
                 page += 1
-            return repos if repos else FALLBACK_REPOS
+            return repos if repos else (FALLBACK_REPOS if demo_mode() else [])
     except Exception as e:
         print(f"[GitHub] fetch_user_repos failed: {e}")
-    return FALLBACK_REPOS
+    return FALLBACK_REPOS if demo_mode() else []
 
 async def fetch_readme(owner: str, repo: str) -> str:
     try:
