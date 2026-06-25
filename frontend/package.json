@@ -10,7 +10,7 @@
   "dependencies": {
     "next": "14.2.35",
     "react": "^18",
-    "react-dom": "^18",
+    "react-dom": "^19",
     "@react-three/fiber": "^8.17.10",
     "@react-three/drei": "^9.115.0",
     "three": "^0.168.0",
