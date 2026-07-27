@@ -2,7 +2,9 @@
 import { useState, useRef, useCallback } from 'react'
 import { useJarvisStore } from '../app/store'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+import { API_BASE } from '../lib/api'
+
+const API = API_BASE
 
 function DropZone({ onFiles }) {
   const [dragging, setDragging] = useState(false)

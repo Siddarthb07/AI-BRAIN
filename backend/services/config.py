@@ -29,5 +29,8 @@ def llm_max_tokens() -> int:
 
 
 def cors_origins() -> list[str]:
-    raw = os.getenv("CORS_ORIGINS", "http://localhost:5050,http://127.0.0.1:5050")
+    raw = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5050,http://127.0.0.1:5050",
+    )
     return [o.strip() for o in raw.split(",") if o.strip()]

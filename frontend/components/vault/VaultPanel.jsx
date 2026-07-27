@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useJarvisStore } from '../app/store'
+import { useJarvisStore } from '../../app/store'
 
 export default function VaultPanel() {
   const vaultNotes = useJarvisStore((s) => s.vaultNotes)

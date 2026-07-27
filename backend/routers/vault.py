@@ -18,11 +18,24 @@ class SaveNoteRequest(BaseModel):
 
 
 class SetVaultPathRequest(BaseModel):
-  path: str
+    path: str
 
 
 @router.get("/status")
 async def get_status():
+    return vault.vault_status()
+
+
+@router.post("/path")
+async def set_vault_path(payload: SetVaultPathRequest):
+    """Set VAULT_PATH for this process (persists for the running backend only)."""
+    import os
+    from pathlib import Path
+
+    root = Path(payload.path).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(400, f"Path is not a directory: {root}")
+    os.environ["VAULT_PATH"] = str(root)
     return vault.vault_status()
 
 

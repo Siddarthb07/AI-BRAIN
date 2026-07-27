@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Any
 
+from services.secrets import decrypt_mapping, encrypt_mapping
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 STATE_FILE = DATA_DIR / "state.json"
@@ -20,8 +22,8 @@ def _default_google_calendar_state() -> Dict[str, Any]:
 
 _state: Dict[str, Any] = {
     "context": {
-        "daily_goals": ["Ship the MVP", "Review open issues", "Write documentation"],
-        "active_project": "JARVIS AI Brain",
+        "daily_goals": ["Advance active project", "Clear blockers", "Ship one measurable win"],
+        "active_project": "unset",
         "focus_time": "09:00-12:00",
         "energy_level": "high"
     },
@@ -36,19 +38,34 @@ def _load():
     global _state
     if STATE_FILE.exists():
         try:
-            saved = json.loads(STATE_FILE.read_text())
+            saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
             _state.update(saved)
-        except:
+        except Exception:
             pass
-    _state["google_calendar"] = {
+    calendar = {
         **_default_google_calendar_state(),
         **(_state.get("google_calendar") or {}),
     }
+    tokens = calendar.get("tokens")
+    if tokens:
+        try:
+            calendar["tokens"] = decrypt_mapping(tokens)
+        except Exception as exc:
+            print(f"[store] Token decrypt failed: {exc}")
+            calendar["tokens"] = None
+            calendar["connected"] = False
+            calendar["last_error"] = str(exc)
+    _state["google_calendar"] = calendar
 
 def _save():
     try:
-        STATE_FILE.write_text(json.dumps(_state, indent=2, default=str))
-    except:
+        to_disk = dict(_state)
+        calendar = dict(to_disk.get("google_calendar") or {})
+        if calendar.get("tokens"):
+            calendar["tokens"] = encrypt_mapping(calendar["tokens"])
+        to_disk["google_calendar"] = calendar
+        STATE_FILE.write_text(json.dumps(to_disk, indent=2, default=str), encoding="utf-8")
+    except Exception:
         pass
 
 _load()
@@ -64,7 +81,30 @@ def get_repos() -> List[Dict]:
     return _state.get("repos", [])
 
 def set_repos(repos: List[Dict]):
-    _state["repos"] = repos
+    """Replace/update repo list while preserving enrichment from deep ingest."""
+    existing_by_name = {r.get("name"): r for r in _state.get("repos", []) if r.get("name")}
+    merged: List[Dict] = []
+    keep_keys = (
+        "patterns",
+        "file_count",
+        "languages",
+        "entry_points",
+        "key_imports",
+        "readme_excerpt",
+        "structure_summary",
+    )
+    for repo in repos or []:
+        name = repo.get("name")
+        if not name:
+            continue
+        prev = existing_by_name.get(name) or {}
+        row = dict(prev)
+        row.update({k: v for k, v in repo.items() if v is not None and v != "" and v != []})
+        for key in keep_keys:
+            if not row.get(key) and prev.get(key):
+                row[key] = prev[key]
+        merged.append(row)
+    _state["repos"] = merged
     _save()
 
 def add_repo(repo: Dict):

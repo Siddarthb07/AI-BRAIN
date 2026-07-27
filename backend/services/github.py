@@ -4,8 +4,6 @@ from typing import List, Dict, Optional
 
 from services.config import demo_mode
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-
 FALLBACK_REPOS = [
     {"name": "lexprobe", "description": "Indian legal AI with RAG and citation verification", "language": "Python", "topics": ["ai", "legal", "rag", "fastapi"], "stars": 12, "updated": "2025-01-01", "url": "https://github.com/example/lexprobe"},
     {"name": "health-ai", "description": "Clinical risk calculator with validated algorithms", "language": "Python", "topics": ["health", "machine-learning", "flask", "clinical"], "stars": 8, "updated": "2025-01-01", "url": "https://github.com/example/health-ai"},
@@ -16,8 +14,9 @@ FALLBACK_REPOS = [
 
 def _headers():
     h = {"Accept": "application/vnd.github.v3+json", "User-Agent": "JARVIS-Brain/1.0"}
-    if GITHUB_TOKEN:
-        h["Authorization"] = f"token {GITHUB_TOKEN}"
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if token:
+        h["Authorization"] = f"token {token}"
     return h
 
 async def fetch_repo(owner: str, repo: str) -> Dict:
@@ -52,6 +51,7 @@ async def fetch_user_repos(username: str) -> List[Dict]:
                     params={"per_page": 30, "page": page, "sort": "updated", "type": "owner"}
                 )
                 if resp.status_code != 200:
+                    print(f"[GitHub] fetch_user_repos HTTP {resp.status_code}: {resp.text[:200]}")
                     break
                 data = resp.json()
                 if not data:

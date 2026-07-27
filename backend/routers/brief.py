@@ -16,12 +16,12 @@ def _today_label() -> str:
 
 FALLBACK_BRIEF = {
     "date": _today_label(),
-    "greeting": "Good morning. Systems are stable and ready.",
+    "greeting": "Good morning. Set your focus, then execute.",
     "priority_actions": [
-        "Ship your highest-impact task before lunch",
-        "Review open pull requests and close stale issues",
+        "Set or confirm your active project in Focus",
+        "Clear one blocker on that project",
+        "Ship one measurable win before context-switch",
         "Protect one focused learning block today",
-        "Update docs before you context-switch",
     ],
     "insights": [
         "Small finished slices beat big half-finished plans.",
@@ -75,20 +75,25 @@ async def get_brief():
         except Exception as exc:
             print(f"[Brief] Calendar sync failed: {exc}")
 
-    goals_str = ", ".join(ctx.get("daily_goals", ["Ship the MVP"]))
-    active = ctx.get("active_project", "current project")
+    goals_str = ", ".join(ctx.get("daily_goals", ["Advance active project"]))
+    active = ctx.get("active_project") or "unset"
     hn_str = "\n".join(f"- {story['title']} ({story['score']} pts)" for story in stories[:3]) or "- No HN stories available"
     repo_str = ", ".join(repo["name"] for repo in repos[:5]) if repos else "No repositories indexed yet"
     calendar_str = google_calendar.events_to_context(calendar_events, limit=4) or "- No upcoming calendar events"
 
     prompt = f"""Generate a concise developer daily brief.
-Active project: {active}
+Active project (MUST be the focus of priorities — do NOT invent a JARVIS MVP goal unless that is the active project): {active}
 Today's goals: {goals_str}
 Tracked repositories: {repo_str}
 Upcoming Google Calendar events:
 {calendar_str}
 Top Hacker News signals:
 {hn_str}
+
+Rules:
+- priority_actions must be concrete next steps for the ACTIVE PROJECT above.
+- If active project is "unset", first priority should be "Set your active project in Focus".
+- Never default to shipping JARVIS MVP unless active_project is literally JARVIS / AI-BRAIN.
 
 Return a JSON object with these exact keys:
 - greeting: string (1 line, mention the day/time mood)
@@ -113,7 +118,11 @@ Only output valid JSON."""
     except LLMOfflineError:
         brief_data["llm_available"] = False
         brief_data["greeting"] = "JARVIS brief unavailable — LLM offline."
-        brief_data["priority_actions"] = ["Start Ollama or set GROQ_API_KEY", "Sync your vault", "Review today's calendar"]
+        brief_data["priority_actions"] = [
+            "Groq rate-limited — wait a bit or use a lighter GROQ_MODEL",
+            "Sync your vault",
+            "Review today's calendar",
+        ]
         brief_data["insights"] = []
         brief_data["hn_picks"] = []
         brief_data["voice_summary"] = "LLM offline. Connect Ollama to generate your brief."
@@ -127,6 +136,19 @@ Only output valid JSON."""
             brief_data["hn_picks"] = []
 
     _apply_calendar_fallback(brief_data, calendar_events)
+
+    house_snapshot = []
+    try:
+        from services.house import get_adapter
+
+        adapter = get_adapter()
+        for ent in adapter.list_entities()[:8]:
+            house_snapshot.append(f"{ent.get('name') or ent['id']}: {ent.get('state')}")
+        if house_snapshot:
+            brief_data["house_snapshot"] = house_snapshot
+            brief_data["house_backend"] = adapter.name
+    except Exception as exc:
+        print(f"[Brief] House snapshot failed: {exc}")
 
     brief_data["repos_count"] = len(repos)
     brief_data["active_project"] = active

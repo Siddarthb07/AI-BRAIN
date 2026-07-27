@@ -109,7 +109,7 @@ export default function CalendarPanel() {
           {[
             `GOOGLE_CLIENT_ID=...`,
             `GOOGLE_CLIENT_SECRET=...`,
-            `GOOGLE_REDIRECT_URI=${googleCalendar.redirect_uri || 'http://localhost:8001/calendar/google/callback'}`,
+            `GOOGLE_REDIRECT_URI=${googleCalendar.redirect_uri || 'http://localhost:8002/calendar/google/callback'}`,
             `GOOGLE_FRONTEND_URL=${googleCalendar.frontend_url || 'http://localhost:5050'}`,
             `GOOGLE_CALENDAR_ID=primary`,
           ].map((item) => (

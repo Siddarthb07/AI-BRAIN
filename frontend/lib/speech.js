@@ -1,4 +1,6 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+import { API_BASE } from './api'
+
+const API = API_BASE
 
 let activeAudio = null
 let activeUrl = null
@@ -108,7 +110,7 @@ function beginPlaybackSession() {
   return speechToken
 }
 
-async function waitForVoices(timeoutMs = 2000) {
+async function waitForVoices(timeoutMs = 400) {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return []
 
   const existing = window.speechSynthesis.getVoices()
@@ -127,8 +129,44 @@ async function waitForVoices(timeoutMs = 2000) {
     const handleVoices = () => finish()
 
     window.speechSynthesis.addEventListener('voiceschanged', handleVoices)
+    // Don't stall speech for 2s — speak with default voice if list is slow
     setTimeout(finish, timeoutMs)
   })
+}
+
+let cachedVoice = null
+let cachedVoiceKey = ''
+
+function pickVoiceCached(voices = [], voiceMatchers = []) {
+  const key = `${voiceMatchers.join('|')}|${voices.length}`
+  if (cachedVoice && cachedVoiceKey === key) return cachedVoice
+  const voice = pickVoice(voices, voiceMatchers)
+  cachedVoice = voice
+  cachedVoiceKey = key
+  return voice
+}
+
+/** Speakable clip — keeps more of the reply; trims ACTIONS JSON tail. */
+export function clipForSpeech(text = '', maxChars = 900) {
+  let cleaned = String(text)
+    .replace(/\n?ACTIONS:\s*\[[\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return ''
+  if (cleaned.length <= maxChars) return cleaned
+  const cut = cleaned.slice(0, maxChars)
+  // Prefer ending on a sentence near the limit
+  const sentences = cut.match(/[\s\S]+?[.!?]+(?=\s|$)/g)
+  if (sentences) {
+    let acc = ''
+    for (const s of sentences) {
+      if ((acc + s).length > maxChars) break
+      acc += s
+    }
+    if (acc.length > 80) return acc.trim()
+  }
+  const space = cut.lastIndexOf(' ')
+  return `${(space > 120 ? cut.slice(0, space) : cut).trim()}…`
 }
 
 function scoreVoice(voice) {
@@ -226,46 +264,41 @@ async function speakInBrowser(text, options = {}, token = speechToken) {
 
   const voices = await waitForVoices()
   if (token !== speechToken) return false
-  const preferred = pickVoice(voices, options.voiceMatchers || AMERICAN_VOICE_MATCHERS)
-  const chunks = splitIntoChunks(text, options.browserChunkSize ?? 220)
+  const preferred = pickVoiceCached(voices, options.voiceMatchers || AMERICAN_VOICE_MATCHERS)
+  const hardCap = options.browserMaxChars ?? 900
+  const maxChunk = options.browserChunkSize ?? 320
+  const clipped = text.length > hardCap ? text.slice(0, hardCap) : text
+  const chunks = splitIntoChunks(clipped, maxChunk)
   if (chunks.length === 0) return false
 
-  return new Promise((resolve) => {
-    let finished = false
-
-    const complete = (started) => {
-      if (finished) return
-      finished = true
-      if (started) options.onEnd?.()
-      resolve(started)
-    }
-
-    const speakChunk = (index) => {
+  const speakOne = (chunk) =>
+    new Promise((resolve) => {
       if (token !== speechToken) {
-        complete(false)
+        resolve(false)
         return
       }
-
-      if (index >= chunks.length) {
-        complete(true)
-        return
-      }
-
-      const utterance = new SpeechSynthesisUtterance(chunks[index])
+      const utterance = new SpeechSynthesisUtterance(chunk)
       utterance.lang = options.lang ?? preferred?.lang ?? 'en-US'
-      utterance.rate = options.rate ?? 0.98
+      utterance.rate = options.rate ?? 1.05
       utterance.pitch = options.pitch ?? 1
       utterance.volume = options.volume ?? 1
       if (preferred) utterance.voice = preferred
-
-      utterance.onend = () => speakChunk(index + 1)
-      utterance.onerror = () => complete(false)
-
+      utterance.onend = () => resolve(true)
+      utterance.onerror = () => resolve(false)
+      try {
+        window.speechSynthesis.resume()
+      } catch {}
       window.speechSynthesis.speak(utterance)
-    }
+    })
 
-    speakChunk(0)
-  })
+  // Queue every chunk — never truncate joined text to one chunk length
+  for (let i = 0; i < chunks.length; i++) {
+    if (token !== speechToken) return false
+    const ok = await speakOne(chunks[i])
+    if (!ok) return false
+  }
+  if (token === speechToken) options.onEnd?.()
+  return true
 }
 
 export function stopSpeechPlayback() {
@@ -364,6 +397,7 @@ export async function speakText(text, options = {}) {
   }
 
   const token = beginPlaybackSession()
+  const browserOnly = options.browserOnly === true || options.preferBackend === false
 
   const tryBrowserFirst = options.preferBrowser !== false
   if (tryBrowserFirst) {
@@ -373,7 +407,7 @@ export async function speakText(text, options = {}) {
 
   if (token !== speechToken) return false
 
-  if (options.preferBackend !== false) {
+  if (!browserOnly && options.preferBackend !== false) {
     const backendStarted = await speakWithBackend(content, options, token)
     if (backendStarted) return true
   }

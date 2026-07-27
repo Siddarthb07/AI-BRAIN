@@ -2,7 +2,7 @@ import os
 import json
 import hashlib
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = "jarvis_brain"
@@ -69,9 +69,35 @@ async def add_document(text: str, metadata: Dict) -> bool:
     save_local_store(docs)
     return True
 
-async def search(query: str, top_k: int = 5) -> List[Dict]:
+async def search(query: str, top_k: int = 5, repo_name: Optional[str] = None) -> List[Dict]:
     results = []
-    
+    docs = load_local_store()
+    stop = {"the", "a", "an", "my", "me", "about", "project", "repo", "repository", "what", "how", "can", "i", "it", "is", "are", "of", "to", "and", "for"}
+
+    def hydrate(hit: Dict) -> Dict:
+        """Prefer full local text over Qdrant's truncated payload."""
+        meta = hit.get("metadata") or {}
+        text = hit.get("text") or ""
+        source = str(meta.get("source") or "")
+        path = str(meta.get("path") or "")
+        name = str(meta.get("name") or "")
+        for doc in docs:
+            dm = doc.get("metadata") or {}
+            if source and dm.get("source") == source:
+                return {**hit, "text": doc.get("text") or text, "metadata": {**dm, **meta}}
+            if name and path and dm.get("name") == name and dm.get("path") == path:
+                return {**hit, "text": doc.get("text") or text, "metadata": {**dm, **meta}}
+        return hit
+
+    def matches_repo(meta: Dict) -> bool:
+        if not repo_name:
+            return True
+        target = repo_name.lower()
+        return (
+            str(meta.get("name") or "").lower() == target
+            or target in str(meta.get("source") or "").lower()
+        )
+
     # Try Qdrant semantic search
     try:
         import httpx
@@ -81,27 +107,89 @@ async def search(query: str, top_k: int = 5) -> List[Dict]:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
                     f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/search",
-                    json={"vector": embedding, "limit": top_k, "with_payload": True}
+                    json={"vector": embedding, "limit": top_k * 3, "with_payload": True}
                 )
                 if resp.status_code == 200:
                     hits = resp.json().get("result", [])
-                    results = [{"text": h["payload"].get("text", ""), "score": h["score"], "metadata": {k: v for k, v in h["payload"].items() if k != "text"}} for h in hits]
+                    raw = []
+                    for h in hits:
+                        payload = h.get("payload") or {}
+                        meta = {k: v for k, v in payload.items() if k != "text"}
+                        if not matches_repo(meta):
+                            continue
+                        raw.append({"text": payload.get("text", ""), "score": h.get("score", 0), "metadata": meta})
+                    results = [hydrate(r) for r in raw[:top_k]]
     except Exception as e:
         print(f"[RAG] Qdrant search failed: {e}")
-    
-    # Fallback: keyword search local store
-    if not results:
-        docs = load_local_store()
+
+    # Fallback / supplement: keyword search local store
+    if len(results) < top_k:
         query_lower = query.lower()
+        words = [w for w in query_lower.replace("/", " ").split() if len(w) > 1 and w not in stop]
+        if repo_name:
+            words = list(dict.fromkeys([repo_name.lower(), *words]))
         scored = []
         for doc in docs:
-            score = sum(1 for word in query_lower.split() if word in doc["text"].lower())
+            meta = doc.get("metadata") or {}
+            if not matches_repo(meta):
+                continue
+            text_l = (doc.get("text") or "").lower()
+            score = 0.0
+            for word in words:
+                if word in text_l:
+                    score += 2.0 if word == (repo_name or "").lower() else 1.0
+            # Boost structured project docs
+            dtype = meta.get("type")
+            if dtype == "repo_meta":
+                score += 3.0
+            elif dtype == "repo_structure":
+                score += 2.5
+            elif dtype == "code_file" and str(meta.get("path") or "").lower().endswith(("readme.md", "app.py", "main.py")):
+                score += 1.5
             if score > 0:
-                scored.append({"text": doc["text"][:500], "score": score / 10.0, "metadata": doc.get("metadata", {})})
+                scored.append({"text": doc.get("text") or "", "score": score, "metadata": meta})
         scored.sort(key=lambda x: x["score"], reverse=True)
-        results = scored[:top_k]
-    
-    return results
+        seen_sources = {str((r.get("metadata") or {}).get("source")) for r in results}
+        for item in scored:
+            src = str((item.get("metadata") or {}).get("source"))
+            if src in seen_sources:
+                continue
+            results.append(item)
+            seen_sources.add(src)
+            if len(results) >= top_k:
+                break
+
+    return results[:top_k]
+
+
+def docs_for_repo(repo_name: str, types: Optional[List[str]] = None, limit: int = 8) -> List[Dict]:
+    """Pull full local RAG docs for a named repo (meta/structure/code)."""
+    docs = load_local_store()
+    target = repo_name.lower()
+    wanted = set(types or ["repo_meta", "repo_structure", "code_file"])
+    out = []
+    for doc in docs:
+        meta = doc.get("metadata") or {}
+        if str(meta.get("name") or "").lower() != target:
+            continue
+        if meta.get("type") not in wanted:
+            continue
+        out.append({"text": doc.get("text") or "", "score": 1.0, "metadata": meta})
+    # Prefer meta + structure first, then entry-like files
+    def rank(item):
+        meta = item.get("metadata") or {}
+        t = meta.get("type")
+        path = str(meta.get("path") or "").lower()
+        if t == "repo_meta":
+            return 0
+        if t == "repo_structure":
+            return 1
+        if path.endswith(("readme.md", "app.py", "main.py", "server.py", "pyproject.toml")):
+            return 2
+        return 3
+    out.sort(key=rank)
+    return out[:limit]
+
 
 def get_context_string(results: List[Dict], max_chars: int = 2000) -> str:
     if not results:
@@ -112,8 +200,13 @@ def get_context_string(results: List[Dict], max_chars: int = 2000) -> str:
         text = r.get("text", "")
         meta = r.get("metadata", {})
         path = meta.get("path") or meta.get("source") or meta.get("title") or "doc"
-        chunk = f"[{i}] ({path}) {text}"
+        # Cap individual snippet so one README doesn't eat the whole budget alone
+        snippet = text if len(text) <= 3500 else text[:3500] + "…"
+        chunk = f"[{i}] ({path}) {snippet}"
         if total + len(chunk) > max_chars:
+            remain = max_chars - total
+            if remain > 200:
+                parts.append(chunk[:remain] + "…")
             break
         parts.append(chunk)
         total += len(chunk)

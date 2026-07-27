@@ -9,7 +9,9 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { useJarvisStore } from '../app/store'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+import { API_BASE } from '../lib/api'
+
+const API = API_BASE
 
 const SUB_TABS = [
   { id: 'image', label: 'IMAGE STUDIO' },

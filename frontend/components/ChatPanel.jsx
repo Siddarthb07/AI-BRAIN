@@ -359,9 +359,9 @@ export default function ChatPanel() {
     const started = await playSpeech(text, {
       preferBrowser: true,
       preferBackend: true,
-      backendMaxChars: 400,
-      browserMaxChars: 240,
-      browserChunkSize: 200,
+      backendMaxChars: 1000,
+      browserMaxChars: 1000,
+      browserChunkSize: 360,
       lang: 'en-US',
       rate: 0.98,
       pitch: 1,

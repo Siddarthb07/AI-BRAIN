@@ -5,26 +5,33 @@
 }
 
 :root {
-  --bg-void: #000408;
-  --bg-deep: #010d1a;
-  --bg-panel: rgba(0, 18, 36, 0.82);
-  --bg-panel-border: rgba(0, 200, 255, 0.12);
+  /* Warm constellation palette — cyan is no longer the only accent */
+  --bg-void: #07060c;
+  --bg-deep: #100e18;
+  --bg-panel: rgba(14, 12, 22, 0.82);
+  --bg-panel-border: rgba(255, 170, 80, 0.16);
 
-  --cyan: #00c8ff;
-  --cyan-dim: rgba(0, 200, 255, 0.5);
-  --cyan-glow: rgba(0, 200, 255, 0.15);
-  --cyan-faint: rgba(0, 200, 255, 0.06);
+  --cyan: #38bdf8;
+  --cyan-dim: rgba(56, 189, 248, 0.5);
+  --cyan-glow: rgba(56, 189, 248, 0.15);
+  --cyan-faint: rgba(56, 189, 248, 0.06);
 
-  --gold: #f0b429;
-  --gold-dim: rgba(240, 180, 41, 0.6);
+  --amber: #ff9f43;
+  --amber-dim: rgba(255, 159, 67, 0.45);
+  --magenta: #e879f9;
+  --teal: #2dd4bf;
+
+  /* Mute accent — warnings only; do not use as brand */
+  --gold: #f0c14a;
+  --gold-dim: rgba(240, 193, 74, 0.45);
 
   --red: #ff3860;
-  --green: #00ff9f;
-  --green-dim: rgba(0, 255, 159, 0.5);
+  --green: #3d9e8f;
+  --green-dim: rgba(61, 158, 143, 0.4);
 
-  --text-primary: #e0f4ff;
-  --text-secondary: rgba(180, 220, 255, 0.7);
-  --text-dim: rgba(100, 160, 200, 0.5);
+  --text-primary: #f4efe6;
+  --text-secondary: rgba(230, 210, 180, 0.72);
+  --text-dim: rgba(160, 140, 120, 0.5);
   --text-mono: 'Share Tech Mono', monospace;
 
   --font-display: 'Orbitron', monospace;
@@ -32,9 +39,9 @@
   --font-mono: 'Share Tech Mono', monospace;
 
   --panel-blur: blur(14px);
-  --glow-sm: 0 0 8px var(--cyan-dim);
-  --glow-md: 0 0 20px var(--cyan-dim), 0 0 40px rgba(0, 200, 255, 0.1);
-  --glow-lg: 0 0 40px var(--cyan-dim), 0 0 80px rgba(0, 200, 255, 0.08);
+  --glow-sm: 0 0 8px var(--amber-dim);
+  --glow-md: 0 0 20px var(--amber-dim), 0 0 40px rgba(232, 121, 249, 0.08);
+  --glow-lg: 0 0 40px var(--amber-dim), 0 0 80px rgba(45, 212, 191, 0.08);
   --border-cyan: 1px solid var(--bg-panel-border);
   --radius: 4px;
   --radius-lg: 8px;
@@ -157,7 +164,7 @@ body::before {
 .fade-in { animation: fade-in-up 0.4s ease forwards; }
 .slide-in { animation: slide-in-right 0.3s ease forwards; }
 
-/* Status badge */
+/* Status badge — cyan default (prefer over green for new surfaces) */
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -166,19 +173,19 @@ body::before {
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--green);
+  color: var(--cyan);
   padding: 3px 8px;
-  border: 1px solid var(--green-dim);
+  border: 1px solid var(--cyan-dim);
   border-radius: 2px;
-  background: rgba(0, 255, 159, 0.04);
+  background: var(--cyan-faint);
 }
 
 .status-badge .dot {
   width: 5px;
   height: 5px;
-  background: var(--green);
+  background: var(--cyan);
   border-radius: 50%;
-  box-shadow: 0 0 6px var(--green);
+  box-shadow: 0 0 6px var(--cyan-dim);
   animation: blink 2s ease-in-out infinite;
 }
 

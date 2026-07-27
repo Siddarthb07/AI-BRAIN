@@ -14,12 +14,20 @@ FOLDERS = ("Chat", "Briefs", "Generated", "Inbox", "Projects", "Logs")
 _SKIP_DIRS = {".obsidian", ".git", ".trash", "node_modules", "__pycache__"}
 
 
+def _default_vault_root() -> Path:
+    """Prefer Desktop/jarvis-vault (OneDrive Desktop on this machine)."""
+    desktop = Path.home() / "OneDrive" / "Desktop" / "jarvis-vault"
+    if desktop.parent.exists():
+        return desktop
+    return Path.home() / "Desktop" / "jarvis-vault"
+
+
 def _vault_root() -> Path:
     raw = (os.getenv("VAULT_PATH") or os.getenv("OBSIDIAN_VAULT_PATH") or "").strip()
     if raw:
         root = Path(raw).expanduser()
     else:
-        root = Path.home() / "Documents" / "JARVIS-Vault"
+        root = _default_vault_root()
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     for folder in FOLDERS:

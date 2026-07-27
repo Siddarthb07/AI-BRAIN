@@ -2,15 +2,18 @@
 import { create } from 'zustand'
 import { formatIstBriefLabel } from '../lib/time'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+import { API_BASE } from '../lib/api'
+import { requestGestureCamera } from '../lib/gestures'
+
+const API = API_BASE
 
 const DEFAULT_GOOGLE_CALENDAR = {
   configured: false,
   connected: false,
   calendar_id: 'primary',
   calendar_label: 'Primary calendar',
-  redirect_uri: 'http://localhost:8001/calendar/google/callback',
-  frontend_url: 'http://localhost:5050',
+  redirect_uri: 'http://localhost:8002/calendar/google/callback',
+  frontend_url: 'http://localhost:3000',
   last_synced_at: null,
   last_error: null,
   upcoming_count: 0,
@@ -45,11 +48,39 @@ export const useJarvisStore = create((set, get) => ({
   selectedNode: null,
   isLoading: false,
   voiceState: 'idle',
+  wakeEnabled: false,
+  wakeStatus: 'off',
+  keepListening: false,
+  gestureControlEnabled: false,
+  gestureBootStream: null,
+  gesturePreviewVisible: true,
+  gestureLatest: null,
+  gestureSession: { running: false, pid: null },
+  visionCameraActive: false,
+  graphSpinEnabled: true,
   statusMsg: 'JARVIS ONLINE',
   activePanel: 'chat',
   layoutMode: 'work',
+  shellMode: 'dashboard',
+  graphData: null,
+  graphProjection: null,
+  houseStatus: null,
+  houseEntities: [],
   knowledgeDocs: 0,
-  healthState: { ollama: false, qdrant: false, vault_configured: false, demo_mode: false },
+  contextState: {
+    active_project: 'unset',
+    daily_goals: [],
+    focus_time: '',
+    energy_level: '',
+  },
+  healthState: {
+    ollama: false,
+    groq: false,
+    qdrant: false,
+    vault_configured: false,
+    demo_mode: false,
+    llm: null,
+  },
   googleCalendar: DEFAULT_GOOGLE_CALENDAR,
   lastSaveToast: null,
 
@@ -57,8 +88,65 @@ export const useJarvisStore = create((set, get) => ({
   setBrief: (brief) => set({ brief }),
   setSelectedNode: (node) => set({ selectedNode: node }),
   setVoiceState: (voiceState) => set({ voiceState }),
+  setWakeEnabled: (wakeEnabled) => set({ wakeEnabled }),
+  setWakeStatus: (wakeStatus) => set({ wakeStatus }),
+  setKeepListening: (keepListening) => set({ keepListening }),
+  setGestureControlEnabled: (gestureControlEnabled) => set({ gestureControlEnabled }),
+  setGestureBootStream: (gestureBootStream) => set({ gestureBootStream }),
+  setGesturePreviewVisible: (gesturePreviewVisible) => set({ gesturePreviewVisible }),
+  setVisionCameraActive: (visionCameraActive) => set({ visionCameraActive }),
+  setGestureLatest: (gestureLatest) => set({ gestureLatest }),
+  setGestureSession: (gestureSession) => set({ gestureSession }),
+  setGraphSpinEnabled: (graphSpinEnabled) => set({ graphSpinEnabled }),
+
+  /** Must run from a click handler so the browser shows the camera prompt. */
+  enableGestures: async () => {
+    set({
+      visionCameraActive: false,
+      statusMsg: 'GESTURES — REQUESTING CAMERA…',
+    })
+    try {
+      const stream = await requestGestureCamera()
+      set({
+        gestureBootStream: stream,
+        gestureControlEnabled: true,
+        gesturePreviewVisible: true,
+        statusMsg: 'GESTURES — CAMERA GRANTED',
+      })
+      return true
+    } catch (e) {
+      set({
+        gestureControlEnabled: false,
+        gestureBootStream: null,
+        statusMsg: `CAMERA DENIED — ${String(e?.message || e).slice(0, 60)}`,
+      })
+      return false
+    }
+  },
+
+  disableGestures: () => {
+    const stream = get().gestureBootStream
+    try {
+      stream?.getTracks?.().forEach((t) => t.stop())
+    } catch {}
+    set({
+      gestureControlEnabled: false,
+      gestureBootStream: null,
+      gestureSession: { running: false, pid: null, source: null },
+      statusMsg: 'GESTURES OFF',
+    })
+  },
+
+  toggleGestures: async () => {
+    if (get().gestureControlEnabled) {
+      get().disableGestures()
+      return false
+    }
+    return get().enableGestures()
+  },
   setActivePanel: (activePanel) => set({ activePanel }),
   setLayoutMode: (layoutMode) => set({ layoutMode }),
+  setShellMode: (shellMode) => set({ shellMode }),
   setStatusMsg: (statusMsg) => set({ statusMsg }),
   setGoogleCalendar: (patch) =>
     set((state) => ({
@@ -80,16 +168,18 @@ export const useJarvisStore = create((set, get) => ({
         return {
           healthState: {
             ollama: Boolean(data.ollama),
+            groq: Boolean(data.groq),
             qdrant: Boolean(data.qdrant),
             vault_configured: Boolean(data.vault_configured),
             demo_mode: Boolean(data.demo_mode),
             vault_path: data.vault_path,
+            llm: data.llm || null,
           },
           statusMsg:
             repairStatus && offlineLike.has(state.statusMsg)
-              ? data.ollama
+              ? data.ollama || data.groq
                 ? 'JARVIS ONLINE'
-                : 'LLM OFFLINE — START OLLAMA'
+                : 'LLM OFFLINE — START OLLAMA OR GROQ'
               : state.statusMsg,
         }
       })
@@ -100,10 +190,104 @@ export const useJarvisStore = create((set, get) => ({
     }
   },
 
-  loadChatSession: async () => {
+  fetchContext: async () => {
     try {
+      const res = await fetch(`${API}/context`, { cache: 'no-store' })
+      if (!res.ok) return null
+      const data = await res.json()
+      const ctx = data.context || data
+      set({
+        contextState: {
+          active_project: ctx.active_project || 'unset',
+          daily_goals: ctx.daily_goals || [],
+          focus_time: ctx.focus_time || '',
+          energy_level: ctx.energy_level || '',
+        },
+      })
+      return ctx
+    } catch {
+      return null
+    }
+  },
+
+  setActiveProject: async (activeProject, dailyGoals) => {
+    const project = String(activeProject || '').trim()
+    if (!project) {
+      set({ statusMsg: 'PROJECT NAME REQUIRED' })
+      return null
+    }
+    try {
+      const body = { active_project: project }
+      if (Array.isArray(dailyGoals) && dailyGoals.length) body.daily_goals = dailyGoals
+      const res = await fetch(`${API}/context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error('context failed')
+      const data = await res.json()
+      const ctx = data.context || data
+      set({
+        contextState: {
+          active_project: ctx.active_project || project,
+          daily_goals: ctx.daily_goals || [],
+          focus_time: ctx.focus_time || '',
+          energy_level: ctx.energy_level || '',
+        },
+        statusMsg: `FOCUS → ${project.toUpperCase()}`,
+      })
+      await get().fetchBrief()
+      return ctx
+    } catch {
+      set({ statusMsg: 'FOCUS SAVE FAILED' })
+      return null
+    }
+  },
+
+  analyzeVision: async (blob, prompt = '') => {
+    try {
+      const form = new FormData()
+      form.append('file', blob, 'capture.jpg')
+      if (prompt) form.append('prompt', prompt)
+      const res = await fetch(`${API}/vision/analyze`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`vision ${res.status}`)
+      return await res.json()
+    } catch (e) {
+      return { status: 'error', analysis: '', error: String(e) }
+    }
+  },
+
+  loadChatSession: async (sessionId) => {
+    try {
+      if (sessionId) {
+        const res = await fetch(`${API}/chat/sessions/${sessionId}`, { cache: 'no-store' })
+        if (!res.ok) {
+          set({ statusMsg: `CHAT LOAD FAILED (${res.status})` })
+          return
+        }
+        const data = await res.json()
+        const history = (data.messages || []).map((m) => ({
+          role: m.role,
+          content: m.content,
+          ts: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
+          citations: m.meta?.citations,
+          actions: m.meta?.actions,
+        }))
+        const sessionsRes = await fetch(`${API}/chat/sessions`, { cache: 'no-store' })
+        const sessionsData = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] }
+        set({
+          sessionId,
+          chatSessions: sessionsData.sessions || [],
+          chatHistory: history,
+          statusMsg: `SESSION · ${history.length} MSGS`,
+        })
+        return
+      }
       const res = await fetch(`${API}/chat/history`, { cache: 'no-store' })
-      if (!res.ok) return
+      if (!res.ok) {
+        set({ statusMsg: `CHAT HISTORY FAILED (${res.status})` })
+        return
+      }
       const data = await res.json()
       const history = (data.history || []).map((m) => ({
         role: m.role,
@@ -116,8 +300,42 @@ export const useJarvisStore = create((set, get) => ({
         sessionId: data.session_id,
         chatSessions: data.sessions || [],
         chatHistory: history,
+        statusMsg: history.length ? `HISTORY · ${history.length} MSGS` : 'CHAT READY',
       })
+    } catch (e) {
+      set({ statusMsg: `CHAT HISTORY OFFLINE — ${String(e?.message || e).slice(0, 40)}` })
+    }
+  },
+
+  refreshChatSessions: async () => {
+    try {
+      const res = await fetch(`${API}/chat/sessions`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      set({ chatSessions: data.sessions || [] })
     } catch {}
+  },
+
+  createChatSession: async (title = 'New chat') => {
+    try {
+      const res = await fetch(`${API}/chat/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) return null
+      const session = await res.json()
+      set({
+        sessionId: session.id,
+        chatHistory: [],
+        statusMsg: 'NEW SESSION',
+      })
+      await get().loadChatSession(session.id)
+      return session
+    } catch {
+      set({ statusMsg: 'SESSION CREATE FAILED' })
+      return null
+    }
   },
 
   fetchVaultStatus: async () => {
@@ -171,24 +389,166 @@ export const useJarvisStore = create((set, get) => ({
     }
   },
 
-  confirmAction: async (actionId) => {
+  confirmAction: async (actionId, confirmToken) => {
     const { sessionId } = get()
     try {
+      const body = { action_id: actionId, session_id: sessionId }
+      if (confirmToken) body.confirm_token = confirmToken
       const res = await fetch(`${API}/chat/action/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action_id: actionId, session_id: sessionId }),
+        body: JSON.stringify(body),
       })
       const data = await res.json()
       if (data.ok) {
-        set({ statusMsg: `ACTION OK — ${data.type}` })
+        set({ statusMsg: `ACTION OK — ${data.type || 'done'}` })
         await get().fetchVaultNotes()
+        await get().fetchHouseEntities()
       } else {
         set({ statusMsg: data.error || 'ACTION FAILED' })
       }
       return data
     } catch {
       set({ statusMsg: 'ACTION FAILED' })
+    }
+  },
+
+  fetchGraph: async ({ layers, limit = 100 } = {}) => {
+    try {
+      const params = new URLSearchParams()
+      if (layers) params.set('layers', Array.isArray(layers) ? layers.join(',') : layers)
+      if (limit) params.set('limit', String(limit))
+      const qs = params.toString()
+      const res = await fetch(`${API}/graph${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
+      if (!res.ok) throw new Error('graph failed')
+      const data = await res.json()
+      set({ graphData: data, graphProjection: data })
+      return data
+    } catch {
+      set({ statusMsg: 'GRAPH OFFLINE' })
+      return null
+    }
+  },
+
+  fetchGestureStatus: async () => {
+    try {
+      const res = await fetch(`${API}/gestures/status`, { cache: 'no-store' })
+      if (!res.ok) return null
+      const data = await res.json()
+      set({
+        gestureSession: data.session || { running: false, pid: null },
+        gestureLatest: data.latest || null,
+      })
+      return data
+    } catch {
+      return null
+    }
+  },
+
+  pollGestureLatest: async () => {
+    try {
+      const res = await fetch(`${API}/gestures/latest`, { cache: 'no-store' })
+      if (!res.ok) return null
+      const data = await res.json()
+      const current = get().gestureLatest
+      // Never overwrite a live browser MediaPipe feed with idle API polls
+      if (current?.source === 'browser' && get().gestureControlEnabled) return current
+      if (get().gestureSession?.source === 'browser' && get().gestureControlEnabled) return current
+      set({ gestureLatest: data })
+      return data
+    } catch {
+      return null
+    }
+  },
+
+  startGestureSession: async () => {
+    try {
+      const res = await fetch(`${API}/gestures/session/start`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'start failed')
+      set({
+        gestureSession: { ...(data.session || { running: true }), source: 'opencv' },
+        gestureControlEnabled: true,
+        statusMsg: 'OPENCV HAND CONTROL ON',
+      })
+      return data
+    } catch (e) {
+      // Browser MediaPipe is the primary path — still enable it
+      set({
+        gestureControlEnabled: true,
+        statusMsg: 'BROWSER GESTURES — CAMERA PROMPT',
+      })
+      return null
+    }
+  },
+
+  stopGestureSession: async () => {
+    try {
+      await fetch(`${API}/gestures/session/stop`, { method: 'POST' })
+    } catch {}
+    set({
+      gestureSession: { running: false, pid: null, source: null },
+      statusMsg: 'OPENCV HAND CONTROL OFF',
+    })
+  },
+
+  fetchHouseStatus: async () => {
+    try {
+      const res = await fetch(`${API}/house/status`, { cache: 'no-store' })
+      if (!res.ok) return null
+      const data = await res.json()
+      set({ houseStatus: data })
+      return data
+    } catch {
+      return null
+    }
+  },
+
+  fetchHouseEntities: async (backend) => {
+    try {
+      const qs = backend ? `?backend=${encodeURIComponent(backend)}` : ''
+      const res = await fetch(`${API}/house/entities${qs}`, { cache: 'no-store' })
+      if (!res.ok) return []
+      const data = await res.json()
+      set({ houseEntities: data.entities || [] })
+      return data.entities || []
+    } catch {
+      set({ houseEntities: [] })
+      return []
+    }
+  },
+
+  proposeHouseService: async ({ entity_id, service = 'turn_on', domain, backend, data = {} }) => {
+    const { sessionId } = get()
+    set({ statusMsg: `PROPOSING ${service.toUpperCase()}...` })
+    try {
+      const res = await fetch(`${API}/house/service`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entity_id,
+          service,
+          domain,
+          backend,
+          data,
+          session_id: sessionId,
+          confirm: false,
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        set({ statusMsg: payload.detail || 'HOUSE ACTION FAILED' })
+        return null
+      }
+      set({
+        statusMsg: payload.requires_confirm
+          ? `CONFIRM — ${payload.action?.label || service}`
+          : 'HOUSE ACTION OK',
+      })
+      return payload
+    } catch {
+      set({ statusMsg: 'HOUSE ACTION FAILED' })
+      return null
     }
   },
 
@@ -224,14 +584,22 @@ export const useJarvisStore = create((set, get) => ({
     try {
       const res = await fetch(`${API}/ingest/github/user/${username}?deep=true`)
       const data = await res.json()
-      set({
-        repos: data.repos || [],
-        statusMsg: data.repos?.length ? `INDEXED ${data.repo_count || data.repos.length} REPOS` : 'NO REPOS FOUND — CONNECT GITHUB',
-      })
+      const nextRepos = data.repos || []
+      if (nextRepos.length) {
+        set({
+          repos: nextRepos,
+          statusMsg: `INDEXED ${data.repo_count || nextRepos.length} REPOS`,
+        })
+      } else {
+        // Keep existing repos — empty response is usually rate-limit / auth, not "no repos"
+        set({
+          statusMsg: data.error || 'GITHUB INGEST EMPTY — CHECK TOKEN / RATE LIMIT',
+        })
+      }
       setTimeout(() => get().pollIngestStatus(), 3000)
       return data
     } catch {
-      set({ statusMsg: 'GITHUB INGEST FAILED', repos: [] })
+      set({ statusMsg: 'GITHUB INGEST FAILED' })
     }
   },
 
@@ -254,36 +622,144 @@ export const useJarvisStore = create((set, get) => ({
       statusMsg: 'THINKING...',
     })
     try {
-      const res = await fetch(`${API}/chat`, {
+      const res = await fetch(`${API}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, include_context: true, session_id: sessionId }),
       })
-      const data = await res.json()
-      const reply = data.reply || data.response || 'No response'
+      if (!res.ok || !res.body) {
+        throw new Error('stream failed')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let assistant = ''
+      let meta = { citations: [], actions: [], llm_offline: false }
+      let gotSession = sessionId
+
+      // Placeholder assistant bubble that streams in place
       set((state) => ({
-        sessionId: data.session_id || state.sessionId,
         chatHistory: [
           ...state.chatHistory,
-          {
-            role: 'assistant',
-            content: reply,
-            ts: Date.now(),
-            citations: data.citations || [],
-            actions: data.actions || [],
-            llm_offline: data.llm_offline,
-          },
+          { role: 'assistant', content: '', ts: Date.now(), streaming: true },
         ],
-        statusMsg: data.llm_offline ? 'LLM OFFLINE' : 'READY',
       }))
-      return reply
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data: ')) continue
+          let event
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+          if (event.type === 'session' && event.session_id) {
+            gotSession = event.session_id
+            set({ sessionId: event.session_id })
+          } else if (event.type === 'token' && event.text) {
+            assistant += event.text
+            set((state) => {
+              const hist = [...state.chatHistory]
+              const last = hist[hist.length - 1]
+              if (last?.role === 'assistant') {
+                hist[hist.length - 1] = { ...last, content: assistant, streaming: true }
+              }
+              return { chatHistory: hist, statusMsg: 'SPEAKING...' }
+            })
+          } else if (event.type === 'meta') {
+            meta = {
+              citations: event.citations || [],
+              actions: event.actions || [],
+              llm_offline: Boolean(event.llm_offline),
+            }
+          } else if (event.type === 'done') {
+            if (event.reply) assistant = event.reply
+            if (event.session_id) gotSession = event.session_id
+          }
+        }
+      }
+
+      set((state) => {
+        const hist = [...state.chatHistory]
+        const last = hist[hist.length - 1]
+        if (last?.role === 'assistant') {
+          hist[hist.length - 1] = {
+            role: 'assistant',
+            content: assistant || 'No response',
+            ts: Date.now(),
+            citations: meta.citations,
+            actions: meta.actions,
+            llm_offline: meta.llm_offline,
+          }
+        }
+        return {
+          sessionId: gotSession || state.sessionId,
+          chatHistory: hist,
+          statusMsg: meta.llm_offline ? 'LLM OFFLINE' : 'READY',
+        }
+      })
+      // Keep thread list in sync with latest session titles / order
+      void get().refreshChatSessions()
+      return assistant
     } catch {
-      const err = 'Backend unreachable. Start the API on port 8001.'
-      set((state) => ({
-        chatHistory: [...state.chatHistory, { role: 'assistant', content: err, ts: Date.now(), llm_offline: true }],
-        statusMsg: 'BACKEND OFFLINE',
-      }))
-      return err
+      // Fallback to non-streaming POST
+      try {
+        const res = await fetch(`${API}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, include_context: true, session_id: sessionId }),
+        })
+        const data = await res.json()
+        const reply = data.reply || data.response || 'No response'
+        set((state) => {
+          const hist = [...state.chatHistory]
+          const last = hist[hist.length - 1]
+          if (last?.role === 'assistant' && last.streaming) {
+            hist[hist.length - 1] = {
+              role: 'assistant',
+              content: reply,
+              ts: Date.now(),
+              citations: data.citations || [],
+              actions: data.actions || [],
+              llm_offline: data.llm_offline,
+            }
+          } else {
+            hist.push({
+              role: 'assistant',
+              content: reply,
+              ts: Date.now(),
+              citations: data.citations || [],
+              actions: data.actions || [],
+              llm_offline: data.llm_offline,
+            })
+          }
+          return {
+            sessionId: data.session_id || state.sessionId,
+            chatHistory: hist,
+            statusMsg: data.llm_offline ? 'LLM OFFLINE' : 'READY',
+          }
+        })
+        void get().refreshChatSessions()
+        return reply
+      } catch {
+        const err = 'Backend unreachable. Start the API on port 8002.'
+        set((state) => ({
+          chatHistory: [
+            ...state.chatHistory.filter((m) => !(m.role === 'assistant' && m.streaming)),
+            { role: 'assistant', content: err, ts: Date.now(), llm_offline: true },
+          ],
+          statusMsg: 'BACKEND OFFLINE',
+        }))
+        return err
+      }
     }
   },
 

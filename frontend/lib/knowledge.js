@@ -183,3 +183,76 @@ export function rankRelevantNews(repo, stories = [], limit = 3) {
   if (nonZero.length > 0) return nonZero.slice(0, limit)
   return ranked.slice(0, limit)
 }
+
+/** Deterministic update bullets for a repo — short graph labels + full text. */
+export function repoUpdateItems(repo = {}, limit = 3) {
+  const enriched = enrichRepo(repo)
+  const name = enriched.name || 'project'
+  const language = enriched.language && enriched.language !== 'Unknown' ? enriched.language : null
+  const topic = (enriched.derivedTopics || [])[0]
+  const pattern = (enriched.derivedPatterns || [])[0]
+  const stars = typeof enriched.stars === 'number' ? enriched.stars : null
+
+  const pool = []
+  if (language) {
+    pool.push({
+      kind: 'update',
+      short: `UPD · ${language}`,
+      text: `Update · ${name} is primarily ${language} — align tooling and deps before the next push.`,
+    })
+  }
+  if (topic) {
+    pool.push({
+      kind: 'update',
+      short: `UPD · ${topic}`,
+      text: `Update · New ${topic} signal for ${name} — skim one reference before coding.`,
+    })
+  }
+  if (pattern) {
+    pool.push({
+      kind: 'update',
+      short: `UPD · ${pattern}`,
+      text: `Update · ${name} leans on ${pattern}; reuse that pattern before inventing a new one.`,
+    })
+  }
+  if (stars !== null) {
+    pool.push({
+      kind: 'update',
+      short: `UPD · ${stars}★`,
+      text: `Update · ${name} has ${stars} stars — ship one public-facing win this week.`,
+    })
+  }
+  if (enriched.description) {
+    pool.push({
+      kind: 'update',
+      short: 'UPD · Next slice',
+      text: `Update · Next measurable slice on ${name}: “${String(enriched.description).slice(0, 80)}”.`,
+    })
+  }
+  pool.push({
+    kind: 'update',
+    short: 'UPD · Vault log',
+    text: `Update · Log one decision for ${name} in the vault after this work block.`,
+  })
+  pool.push({
+    kind: 'update',
+    short: 'UPD · Scope check',
+    text: `Update · Re-read ${name} limits before adding scope.`,
+  })
+
+  const seen = new Set()
+  const out = []
+  for (const item of pool) {
+    const key = item.short.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ ...item, repo: name })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+/** @deprecated use repoUpdateItems */
+export function repoFyiItems(repo = {}, limit = 3) {
+  return repoUpdateItems(repo, limit).map((u) => u.text)
+}

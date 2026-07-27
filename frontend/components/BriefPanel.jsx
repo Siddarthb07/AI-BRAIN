@@ -76,9 +76,9 @@ export default function BriefPanel() {
     const started = await speakText(text, {
       preferBrowser: true,
       preferBackend: true,
-      backendMaxChars: 800,
-      browserMaxChars: 260,
-      browserChunkSize: 220,
+      backendMaxChars: 1000,
+      browserMaxChars: 1000,
+      browserChunkSize: 360,
       lang: 'en-US',
       rate: 0.98,
       pitch: 1,

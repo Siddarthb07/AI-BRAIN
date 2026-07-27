@@ -1,253 +1,131 @@
 'use client'
-import { useMemo, useRef, useState } from 'react'
+
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { MeshDistortMaterial, OrbitControls, Text } from '@react-three/drei'
+import { Billboard, OrbitControls, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import { useJarvisStore } from '../app/store'
-import { enrichRepo, rankRelatedRepos, rankRelevantNews } from '../lib/knowledge'
+import { enrichRepo, rankRelevantNews, repoUpdateItems } from '../lib/knowledge'
 
-const TYPE = {
-  core: { color: '#00c8ff', emissive: '#004466', size: 0.55 },
-  repo: { color: '#00ff9f', emissive: '#003322', size: 0.26 },
-  code_file: { color: '#4ade80', emissive: '#002210', size: 0.14 },
-  pattern: { color: '#f0b429', emissive: '#3a2a00', size: 0.2 },
-  topic: { color: '#fb923c', emissive: '#3a1500', size: 0.18 },
-  lang: { color: '#a78bfa', emissive: '#1e0f40', size: 0.17 },
-  news: { color: '#f472b6', emissive: '#2d0818', size: 0.2 },
-  local_text: { color: '#38bdf8', emissive: '#08283c', size: 0.23, idleIntensity: 0.62 },
-  local_pdf: { color: '#ff8a3d', emissive: '#421300', size: 0.25, idleIntensity: 0.72 },
-}
+/** Palette matched to the reference MEMORY MAP sphere */
+const BG = '#050a0f'
+const CORE_WHITE = '#e8f4ff'
+const NODE_LIGHT = '#a5d8ff'
+const NODE_MID = '#4a90d9'
+const NODE_DARK = '#1e50a2'
+const NODE_NEWS = '#c084fc'
+const NODE_GOLD = '#f0b429'
+const MESH = '#6a8aaa'
+const MESH_DIM = '#1a3a5c'
+const LINE_OUTER = '#0d2a4a'
+const MESH_NEWS = '#5a3a78'
+const MESH_GOLD = '#5a4820'
+const INK = '#02060c'
 
-const FALLBACK_REPOS = [
-  { name: 'lexprobe', language: 'Python', topics: ['ai', 'legal', 'rag'], description: 'Legal AI', patterns: ['REST API', 'RAG', 'Vector DB'] },
-  { name: 'health-ai', language: 'Python', topics: ['health', 'ml'], description: 'Clinical AI', patterns: ['Database', 'Tests'] },
-  { name: 'geoquant', language: 'Python', topics: ['finance', 'trading'], description: 'Finance AI', patterns: ['REST API'] },
-  { name: 'drone-sim', language: 'Python', topics: ['physics', 'simulation'], description: 'Drone Sim', patterns: [] },
-  { name: 'athera', language: 'TypeScript', topics: ['automation', 'ai'], description: 'Workflow AI', patterns: ['React/Next.js', 'Docker'] },
+/** Concentric shells on one sphere — scaled to fit between side rails */
+const R_INNER = 1.65
+const R_MID = 2.45
+const R_OUTER = 3.15
+const R_NEWS = 3.8
+const R_UPDATES = 4.4
+
+const FALLBACK = [
+  'AI-BRAIN', 'Lexprobe', 'NeuralVortex', 'Health-AI', 'GeoQuant',
+  'Athera', 'Anima', 'text2sql-rag', 'Drone-Vortex-Ring-Simulation',
+  'Propeller-simulator', 'vortex-tracker', 'siddarthb',
 ]
 
-function hashString(input = '') {
-  let hash = 2166136261
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
+function hash(s = '') {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
   }
-  return hash >>> 0
+  return h >>> 0
 }
 
-function seededRange(seed, min, max) {
-  const unit = (hashString(seed) % 10000) / 10000
-  return min + unit * (max - min)
+/** Fibonacci sphere distribution — index must be in [0, count) */
+function fibSphere(index, count, radius) {
+  const n = Math.max(count, 1)
+  const i = (index % n) + 0.5
+  const y = 1 - (2 * i) / n
+  const r = Math.sqrt(Math.max(0, 1 - y * y))
+  const theta = Math.PI * (1 + Math.sqrt(5)) * i
+  return [radius * r * Math.cos(theta), radius * y, radius * r * Math.sin(theta)]
 }
 
-function clipLabel(value = '', max = 24) {
-  return value.length > max ? `${value.slice(0, max - 3)}...` : value
-}
-
-function SynapticEdge({ start, end, color, opacity = 0.2, animated = false }) {
-  const ref = useRef()
-  const pulseRef = useRef()
-
-  const curve = useMemo(() => {
-    const s = new THREE.Vector3(...start)
-    const e = new THREE.Vector3(...end)
-    const mid = s.clone().lerp(e, 0.5)
-    mid.x += seededRange(`${start.join(',')}:${end.join(',')}:x`, -0.7, 0.7)
-    mid.y += seededRange(`${start.join(',')}:${end.join(',')}:y`, -0.6, 0.6)
-    mid.z += seededRange(`${start.join(',')}:${end.join(',')}:z`, -0.7, 0.7)
-    return new THREE.CatmullRomCurve3([s, mid, e])
-  }, [end, start])
-
-  const points = useMemo(() => curve.getPoints(24), [curve])
-  const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points])
-  const pulsePos = useMemo(() => curve.getPoint(0), [curve])
-
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime
-    if (ref.current) {
-      ref.current.material.opacity = opacity + Math.sin(t * 1.2 + start[0] * 3) * 0.05
-    }
-    if (pulseRef.current && animated) {
-      const pos = curve.getPoint((t * 0.4 + start[0]) % 1)
-      pulseRef.current.position.copy(pos)
-      pulseRef.current.material.opacity = 0.5 + Math.sin(t * 3) * 0.3
-    }
-  })
-
+function WireSphere({ radius, color, opacity, segments = 36 }) {
   return (
-    <group>
-      <line ref={ref} geometry={geometry}>
-        <lineBasicMaterial color={color} transparent opacity={opacity} />
-      </line>
-      {animated && (
-        <mesh ref={pulseRef} position={pulsePos}>
-          <sphereGeometry args={[0.03, 6, 6]} />
-          <meshBasicMaterial color={color} transparent opacity={0.6} />
-        </mesh>
-      )}
-    </group>
-  )
-}
-
-function NeuralDust({ count = 350 }) {
-  const mesh = useRef()
-  const { positions, phases } = useMemo(() => {
-    const pos = new Float32Array(count * 3)
-    const ph = new Float32Array(count)
-
-    for (let i = 0; i < count; i++) {
-      const theta = Math.random() * Math.PI * 2
-      const phi = Math.acos(2 * Math.random() - 1)
-      const r = 6 + Math.random() * 6
-      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta) * 1.3
-      pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) * 0.9
-      pos[i * 3 + 2] = r * Math.cos(phi) * 1.1
-      ph[i] = Math.random() * Math.PI * 2
-    }
-
-    return { positions: pos, phases: ph }
-  }, [count])
-
-  useFrame(({ clock }) => {
-    if (!mesh.current) return
-    const t = clock.elapsedTime
-    const pos = mesh.current.geometry.attributes.position.array
-    for (let i = 0; i < count; i++) {
-      pos[i * 3 + 1] += Math.sin(t * 0.5 + phases[i]) * 0.002
-    }
-    mesh.current.geometry.attributes.position.needsUpdate = true
-    mesh.current.rotation.y = t * 0.015
-  })
-
-  return (
-    <points ref={mesh}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial size={0.035} color="#00c8ff" transparent opacity={0.25} sizeAttenuation />
-    </points>
-  )
-}
-
-function BrainLobe({ position, scale, color, distort = 0.35, speed = 1.5 }) {
-  const mesh = useRef()
-
-  useFrame(({ clock }) => {
-    if (!mesh.current) return
-    mesh.current.rotation.y = clock.elapsedTime * speed * 0.08
-    mesh.current.rotation.x = Math.sin(clock.elapsedTime * speed * 0.05) * 0.1
-  })
-
-  return (
-    <mesh ref={mesh} position={position} scale={scale}>
-      <sphereGeometry args={[1, 48, 48]} />
-      <MeshDistortMaterial
-        color={color}
-        distort={distort}
-        speed={speed}
-        transparent
-        opacity={0.055}
-        depthWrite={false}
-        roughness={0.3}
-        metalness={0.1}
-      />
+    <mesh>
+      <sphereGeometry args={[radius, segments, Math.floor(segments * 0.65)]} />
+      <meshBasicMaterial color={color} wireframe transparent opacity={opacity} depthWrite={false} />
     </mesh>
   )
 }
 
-function BrainCore() {
-  const outer = useRef()
-  const inner = useRef()
-  const ring1 = useRef()
-  const ring2 = useRef()
-
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime
-    if (outer.current) outer.current.rotation.y = t * 0.09
-    if (inner.current) {
-      inner.current.rotation.y = -t * 0.13
-      inner.current.rotation.z = t * 0.07
-    }
-    if (ring1.current) {
-      ring1.current.rotation.z = t * 0.11
-      ring1.current.rotation.x = t * 0.05
-    }
-    if (ring2.current) {
-      ring2.current.rotation.x = t * 0.08
-      ring2.current.rotation.y = -t * 0.09
-    }
-  })
+function Line({ a, b, color, opacity }) {
+  const geom = useMemo(() => {
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...a),
+      new THREE.Vector3(...b),
+    ])
+    return g
+  }, [a, b])
 
   return (
+    <line geometry={geom}>
+      <lineBasicMaterial color={color} transparent opacity={opacity} depthWrite={false} />
+    </line>
+  )
+}
+
+function Core() {
+  const glow = useRef()
+  useFrame(({ clock }) => {
+    if (!glow.current) return
+    const s = 1 + Math.sin(clock.elapsedTime * 1.8) * 0.06
+    glow.current.scale.setScalar(s)
+  })
+  return (
     <group>
-      <mesh ref={outer}>
-        <sphereGeometry args={[0.95, 64, 64]} />
-        <MeshDistortMaterial
-          color="#001a2e"
-          emissive="#00c8ff"
-          emissiveIntensity={0.25}
-          distort={0.22}
-          speed={1.8}
-          metalness={0.6}
-          roughness={0.2}
-          transparent
-          opacity={0.75}
-        />
-      </mesh>
-
-      <mesh ref={inner}>
-        <sphereGeometry args={[0.55, 32, 32]} />
+      <mesh ref={glow}>
+        <sphereGeometry args={[0.38, 32, 32]} />
         <meshStandardMaterial
-          color="#003050"
-          emissive="#00c8ff"
-          emissiveIntensity={0.8}
-          transparent
-          opacity={0.5}
+          color={CORE_WHITE}
+          emissive={NODE_LIGHT}
+          emissiveIntensity={0.85}
+          roughness={0.25}
+          metalness={0.2}
         />
       </mesh>
-
-      <mesh ref={ring1} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[1.45, 0.012, 8, 80]} />
-        <meshBasicMaterial color="#00c8ff" transparent opacity={0.45} />
-      </mesh>
-
-      <mesh ref={ring2} rotation={[Math.PI / 4, Math.PI / 4, 0]}>
-        <torusGeometry args={[1.6, 0.008, 8, 80]} />
-        <meshBasicMaterial color="#a78bfa" transparent opacity={0.3} />
-      </mesh>
-
       <mesh>
-        <icosahedronGeometry args={[1.05, 1]} />
-        <meshBasicMaterial color="#00c8ff" wireframe transparent opacity={0.06} />
+        <sphereGeometry args={[0.18, 20, 20]} />
+        <meshBasicMaterial color="#ffffff" />
       </mesh>
+      <WireSphere radius={1.15} color={MESH} opacity={0.12} segments={28} />
     </group>
   )
 }
 
-function NeuronNode({ node, onSelect, isSelected }) {
-  const mesh = useRef()
+function Dot({ position, size, color, label, showLabel, labelColor, onSelect, selected }) {
   const [hovered, setHovered] = useState(false)
-  const cfg = TYPE[node.type] || TYPE.repo
+  const active = selected || hovered
+  const mesh = useRef()
 
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime
-    if (!mesh.current) return
-    mesh.current.position.y = node.position[1] + Math.sin(t * 0.7 + node.phase) * 0.18
-    mesh.current.rotation.y = t * 0.3 + node.phase
-    const base = isSelected ? 1.5 : hovered ? 1.25 : 1
-    const pulse = 1 + Math.sin(t * 2.2 + node.phase) * 0.04
-    mesh.current.scale.setScalar(base * pulse)
+  useFrame(() => {
+    if (mesh.current) mesh.current.scale.setScalar(active ? 1.35 : 1)
   })
 
   return (
-    <group position={node.position}>
+    <group position={position}>
       <mesh
         ref={mesh}
-        onClick={(event) => {
-          event.stopPropagation()
-          onSelect(node)
+        onClick={(e) => {
+          e.stopPropagation()
+          onSelect?.()
         }}
-        onPointerOver={() => {
+        onPointerOver={(e) => {
+          e.stopPropagation()
           setHovered(true)
           document.body.style.cursor = 'pointer'
         }}
@@ -256,353 +134,529 @@ function NeuronNode({ node, onSelect, isSelected }) {
           document.body.style.cursor = 'default'
         }}
       >
-        {node.type === 'local_pdf' ? (
-          <boxGeometry args={[cfg.size * 1.35, cfg.size * 1.35, cfg.size]} />
-        ) : node.type === 'local_text' ? (
-          <dodecahedronGeometry args={[cfg.size, 0]} />
-        ) : node.type === 'pattern' || node.type === 'lang' ? (
-          <octahedronGeometry args={[cfg.size, 0]} />
-        ) : node.type === 'news' ? (
-          <icosahedronGeometry args={[cfg.size, 0]} />
-        ) : node.type === 'topic' ? (
-          <tetrahedronGeometry args={[cfg.size, 0]} />
-        ) : (
-          <sphereGeometry args={[cfg.size, 20, 20]} />
-        )}
+        <sphereGeometry args={[size, 16, 16]} />
         <meshStandardMaterial
-          color={hovered || isSelected ? cfg.color : cfg.emissive}
-          emissive={cfg.color}
-          emissiveIntensity={isSelected ? 1.2 : hovered ? 0.9 : cfg.idleIntensity || 0.35}
-          metalness={0.4}
-          roughness={0.35}
-          transparent
-          opacity={0.96}
+          color={active ? CORE_WHITE : color}
+          emissive={color}
+          emissiveIntensity={active ? 0.7 : 0.35}
+          roughness={0.4}
+          metalness={0.25}
         />
       </mesh>
-
-      {(hovered || isSelected) && (
-        <Text
-          position={[0, cfg.size + 0.28, 0]}
-          fontSize={node.type === 'code_file' ? 0.1 : 0.14}
-          color={cfg.color}
-          anchorX="center"
-          anchorY="bottom"
-          outlineWidth={0.012}
-          outlineColor="#000408"
-          maxWidth={2.5}
-        >
-          {node.label}
-        </Text>
-      )}
+      {showLabel && label ? (
+        <Billboard follow>
+          <Text
+            position={[0, size + 0.16, 0]}
+            fontSize={0.13}
+            color={labelColor || NODE_LIGHT}
+            anchorX="center"
+            anchorY="bottom"
+            outlineWidth={0.012}
+            outlineColor={INK}
+            fillOpacity={0.88}
+            maxWidth={2.2}
+          >
+            {label}
+          </Text>
+        </Billboard>
+      ) : null}
     </group>
   )
 }
 
-function Lights() {
-  const light1 = useRef()
+function buildNodes(graphProjection, repos, hnStories) {
+  const repoLookup = new Map((repos || []).map((r) => [r.name, enrichRepo(r)]))
 
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime
-    if (light1.current) {
-      light1.current.position.x = Math.sin(t * 0.3) * 5
-      light1.current.position.z = Math.cos(t * 0.3) * 5
+  let repoNames = (graphProjection?.nodes || [])
+    .filter((n) => n.type === 'repo')
+    .map((n) => String(n.label || n.id).replace(/^repo:/, ''))
+
+  if (!repoNames.length) {
+    repoNames = (repos || []).map((r) => r.name).filter(Boolean)
+  }
+  if (!repoNames.length) repoNames = FALLBACK
+  repoNames = repoNames.slice(0, 24)
+
+  const mid = repoNames.map((name, i) => {
+    const data = repoLookup.get(name) || enrichRepo({ name })
+    return {
+      id: `repo:${name}`,
+      label: name.length > 18 ? `${name.slice(0, 17)}…` : name,
+      position: fibSphere(i, repoNames.length, R_MID),
+      size: 0.18 + (hash(name) % 8) * 0.01,
+      color: NODE_LIGHT,
+      shell: 'mid',
+      showLabel: true,
+      type: 'repo',
+      data,
     }
   })
 
+  const outerCount = 14
+  const outer = Array.from({ length: outerCount }, (_, i) => ({
+    id: `outer:${i}`,
+    label: '',
+    position: fibSphere(i, outerCount, R_OUTER),
+    size: 0.14 + (i % 4) * 0.018,
+    color: NODE_DARK,
+    shell: 'outer',
+    showLabel: false,
+    type: 'node',
+    data: null,
+  }))
+
+  const innerCount = 12
+  const inner = Array.from({ length: innerCount }, (_, i) => ({
+    id: `inner:${i}`,
+    label: '',
+    position: fibSphere(i, innerCount, R_INNER),
+    size: 0.09 + (i % 3) * 0.012,
+    color: NODE_MID,
+    shell: 'inner',
+    showLabel: false,
+    type: 'node',
+    data: null,
+  }))
+
+  const newsRaw = []
+  const updateRaw = []
+  const stories = hnStories || []
+  const focusRepos = mid.slice(0, 6)
+  const seenNews = new Set()
+
+  focusRepos.forEach((repoNode) => {
+    rankRelevantNews(repoNode.data, stories, 3).forEach(({ story, index }) => {
+      const key = String(story?.title || index)
+      if (seenNews.has(key)) return
+      seenNews.add(key)
+      const title = String(story?.title || 'News').trim()
+      newsRaw.push({
+        id: `news:${hash(key)}`,
+        label: title.length > 16 ? `${title.slice(0, 15)}…` : title,
+        size: 0.13,
+        color: NODE_NEWS,
+        labelColor: NODE_NEWS,
+        shell: 'news',
+        showLabel: true,
+        type: 'news',
+        data: story,
+        parentRepo: repoNode.data.name,
+      })
+    })
+
+    repoUpdateItems(repoNode.data, 3).forEach((upd, fi) => {
+      updateRaw.push({
+        id: `update:${repoNode.data.name}:${fi}`,
+        label: upd.short,
+        size: 0.12,
+        color: NODE_GOLD,
+        labelColor: NODE_GOLD,
+        shell: 'updates',
+        showLabel: true,
+        type: 'update',
+        data: { text: upd.text, repo: upd.repo, short: upd.short },
+        parentRepo: repoNode.data.name,
+      })
+    })
+  })
+
+  const newsCapped = newsRaw.slice(0, 16)
+  const updateCapped = updateRaw.slice(0, 16)
+  const news = newsCapped.map((node, i) => ({
+    ...node,
+    position: fibSphere(i, Math.max(newsCapped.length, 1), R_NEWS),
+  }))
+  const updates = updateCapped.map((node, i) => ({
+    ...node,
+    position: fibSphere(i, Math.max(updateCapped.length, 1), R_UPDATES),
+  }))
+
+  const main = [...inner, ...mid, ...outer]
+  return { mid, main, news, updates }
+}
+
+function shellLinks(nodes, radius, maxLinks = 28) {
+  const links = []
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = new THREE.Vector3(...nodes[i].position)
+      const b = new THREE.Vector3(...nodes[j].position)
+      if (a.distanceTo(b) < radius * 1.05) links.push([nodes[i].position, nodes[j].position])
+    }
+  }
+  return links.slice(0, maxLinks)
+}
+
+function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEnabled, rotateRef }) {
+  const root = useRef()
+  const newsLayer = useRef()
+  const updatesLayer = useRef()
+  const { mid, main, news, updates } = useMemo(
+    () => buildNodes(graphProjection, repos, hnStories),
+    [graphProjection, repos, hnStories],
+  )
+
+  const midLinks = useMemo(() => shellLinks(mid, R_MID, 48), [mid])
+  const newsLinks = useMemo(() => shellLinks(news, R_NEWS, 24), [news])
+  const updateLinks = useMemo(() => shellLinks(updates, R_UPDATES, 24), [updates])
+
+  useFrame((_, dt) => {
+    if (root.current) {
+      if (spinEnabled) root.current.rotation.y += dt * 0.045
+      const ext = rotateRef?.current
+      if (ext) {
+        root.current.rotation.y += (ext.yaw || 0) * dt * 2.2
+        root.current.rotation.x += (ext.pitch || 0) * dt * 2.0
+        root.current.rotation.x = Math.max(-0.7, Math.min(0.7, root.current.rotation.x))
+      }
+    }
+    // Counter-rotate signal layers slightly so shells read as distinct
+    if (newsLayer.current && spinEnabled) newsLayer.current.rotation.y -= dt * 0.018
+    if (updatesLayer.current && spinEnabled) updatesLayer.current.rotation.y += dt * 0.012
+  })
+
+  const pick = (n) =>
+    onSelect({
+      id: n.id,
+      label:
+        n.type === 'news'
+          ? n.data?.title || n.label
+          : n.type === 'update'
+            ? n.data?.short || n.label
+            : n.label || n.id,
+      type: n.type,
+      data: n.data,
+      position: n.position,
+    })
+
+  const renderDots = (nodes) =>
+    nodes.map((n) => (
+      <Dot
+        key={n.id}
+        position={n.position}
+        size={n.size}
+        color={n.color}
+        label={n.label}
+        labelColor={n.labelColor}
+        showLabel={n.showLabel}
+        selected={selectedId === n.id}
+        onSelect={() => pick(n)}
+      />
+    ))
+
   return (
-    <>
-      <ambientLight intensity={0.08} />
-      <pointLight position={[0, 0, 0]} color="#00c8ff" intensity={3} distance={12} />
-      <pointLight ref={light1} position={[6, 4, 4]} color="#a78bfa" intensity={1.2} distance={18} />
-      <pointLight position={[-6, -3, -4]} color="#00ff9f" intensity={0.7} distance={15} />
-      <pointLight position={[0, 8, 0]} color="#f0b429" intensity={0.4} distance={20} />
-    </>
+    <group ref={root}>
+      <ambientLight intensity={0.4} color="#b0d4ff" />
+      <pointLight position={[0, 0, 0]} intensity={1.1} distance={20} color={NODE_LIGHT} />
+      <pointLight position={[4, 3, 5]} intensity={0.35} distance={22} color={NODE_NEWS} />
+      <pointLight position={[-3, -2, 4]} intensity={0.3} distance={22} color={NODE_GOLD} />
+      <pointLight position={[6, 5, 4]} intensity={0.4} distance={28} color="#ffffff" />
+
+      <Core />
+      <WireSphere radius={R_INNER} color={MESH} opacity={0.07} segments={32} />
+      <WireSphere radius={R_MID} color={MESH} opacity={0.11} segments={40} />
+      <WireSphere radius={R_OUTER} color={MESH_DIM} opacity={0.14} segments={28} />
+      <WireSphere radius={R_NEWS} color={MESH_NEWS} opacity={0.16} segments={30} />
+      <WireSphere radius={R_UPDATES} color={MESH_GOLD} opacity={0.14} segments={26} />
+
+      {midLinks.map(([a, b], i) => (
+        <Line key={`m-${i}`} a={a} b={b} color={MESH} opacity={0.22} />
+      ))}
+
+      {main.map((n) => (
+        <Line
+          key={`r-${n.id}`}
+          a={[0, 0, 0]}
+          b={n.position}
+          color={n.shell === 'outer' ? LINE_OUTER : MESH_DIM}
+          opacity={n.shell === 'outer' ? 0.45 : 0.2}
+        />
+      ))}
+
+      {renderDots(main)}
+
+      {/* Purple news layer */}
+      <group ref={newsLayer}>
+        {news.map((n) => (
+          <Line key={`nr-${n.id}`} a={[0, 0, 0]} b={n.position} color={NODE_NEWS} opacity={0.2} />
+        ))}
+        {newsLinks.map(([a, b], i) => (
+          <Line key={`nl-${i}`} a={a} b={b} color={NODE_NEWS} opacity={0.18} />
+        ))}
+        {renderDots(news)}
+      </group>
+
+      {/* Gold updates layer */}
+      <group ref={updatesLayer}>
+        {updates.map((n) => (
+          <Line key={`ur-${n.id}`} a={[0, 0, 0]} b={n.position} color={NODE_GOLD} opacity={0.2} />
+        ))}
+        {updateLinks.map(([a, b], i) => (
+          <Line key={`ul-${i}`} a={a} b={b} color={NODE_GOLD} opacity={0.16} />
+        ))}
+        {renderDots(updates)}
+      </group>
+    </group>
   )
 }
 
-function buildNeuralGraph(repos, hnStories, localDocs = []) {
-  const nodes = []
-  const edges = []
-  const nodeSet = new Set()
-
-  const addNode = (node) => {
-    if (!nodeSet.has(node.id)) {
-      nodeSet.add(node.id)
-      nodes.push(node)
-    }
-  }
-
-  addNode({ id: 'core', label: 'JARVIS', type: 'core', position: [0, 0, 0], phase: 0, data: {} })
-
-  const repoList = (repos.length > 0 ? repos : FALLBACK_REPOS).map(enrichRepo)
-  const maxReposPerRing = 8
-  const maxPatternNodes = repoList.length > 10 ? 2 : 3
-  const maxTopicNodes = repoList.length > 12 ? 2 : 3
-  const maxFileNodes = repoList.length > 10 ? 2 : 4
-
-  repoList.forEach((repo, index) => {
-    const ringIndex = Math.floor(index / maxReposPerRing)
-    const slotInRing = index % maxReposPerRing
-    const itemsInRing = Math.min(maxReposPerRing, repoList.length - ringIndex * maxReposPerRing)
-    const angle = (slotInRing / Math.max(itemsInRing, 1)) * Math.PI * 2 + ringIndex * 0.35
-    const radius = 3.2 + ringIndex * 1.15 + seededRange(`${repo.name}:radius`, -0.18, 0.22)
-    const yBand = ((ringIndex % 3) - 1) * 0.95
-    const yPos =
-      yBand +
-      Math.sin(angle * 2 + seededRange(`${repo.name}:phase`, 0, Math.PI * 2)) * 0.65 +
-      seededRange(`${repo.name}:y`, -0.2, 0.2)
-
-    const repoId = `repo-${repo.name}`
-    addNode({
-      id: repoId,
-      label: repo.name,
-      type: 'repo',
-      position: [
-        Math.cos(angle) * radius * 1.2,
-        yPos,
-        Math.sin(angle) * radius * 0.95,
-      ],
-      phase: index * 0.93,
-      data: repo,
-    })
-    edges.push({ from: 'core', to: repoId, color: TYPE.repo.color, animated: index < 3 })
-
-    const patterns = repo.derivedPatterns || repo.patterns || []
-    patterns.slice(0, maxPatternNodes).forEach((pattern, patternIndex) => {
-      const patternId = `pat-${pattern}`
-      if (!nodeSet.has(patternId)) {
-        const patternAngle = angle + (patternIndex - (Math.min(patterns.length, maxPatternNodes) - 1) / 2) * 0.42
-        addNode({
-          id: patternId,
-          label: pattern,
-          type: 'pattern',
-          position: [
-            Math.cos(patternAngle) * (radius + 1.45) * 1.2,
-            yPos + (patternIndex - 0.5) * 0.5,
-            Math.sin(patternAngle) * (radius + 1.45) * 0.95,
-          ],
-          phase: index * 0.7 + patternIndex,
-          data: { name: pattern },
-        })
-      }
-      edges.push({ from: repoId, to: patternId, color: TYPE.pattern.color, animated: false })
-    })
-
-    const topics = (repo.derivedTopics || repo.topics || []).slice(0, maxTopicNodes)
-    topics.forEach((topic, topicIndex) => {
-      const topicId = `topic-${topic}`
-      if (!nodeSet.has(topicId)) {
-        const topicAngle = angle + (topicIndex - (topics.length - 1) / 2) * 0.55
-        const topicRadius = radius + 1.95 + seededRange(`${repo.name}:${topic}:radius`, 0.05, 0.35)
-        addNode({
-          id: topicId,
-          label: topic,
-          type: 'topic',
-          position: [
-            Math.cos(topicAngle) * topicRadius * 1.2,
-            yPos + (topicIndex - 0.5) * 0.85,
-            Math.sin(topicAngle) * topicRadius * 0.95,
-          ],
-          phase: index * 0.8 + topicIndex + 2,
-          data: { name: topic },
-        })
-      }
-      edges.push({ from: repoId, to: topicId, color: TYPE.topic.color, animated: false })
-    })
-
-    if (repo.language) {
-      const languageId = `lang-${repo.language}`
-      if (!nodeSet.has(languageId)) {
-        addNode({
-          id: languageId,
-          label: repo.language,
-          type: 'lang',
-          position: [
-            Math.cos(angle + 0.42) * (radius + 2.4) * 1.2,
-            yPos * 0.25 + seededRange(`${repo.language}:y`, -0.2, 0.2),
-            Math.sin(angle + 0.42) * (radius + 2.4) * 0.95,
-          ],
-          phase: index + 10,
-          data: { name: repo.language },
-        })
-      }
-      edges.push({ from: repoId, to: languageId, color: TYPE.lang.color, animated: false })
-    }
-
-    if (repo.file_count > 0) {
-      const fileCount = Math.min(repo.file_count || 0, maxFileNodes)
-      for (let fileIndex = 0; fileIndex < fileCount; fileIndex++) {
-        const fileId = `file-${repo.name}-${fileIndex + 1}`
-        const fileAngle = angle + (fileIndex - (fileCount - 1) / 2) * 0.24
-        const fileRadius = radius + 1.0
-        addNode({
-          id: fileId,
-          label: `...${repo.name}[${fileIndex + 1}]`,
-          type: 'code_file',
-          position: [
-            Math.cos(fileAngle) * fileRadius * 1.2,
-            yPos + (fileIndex - (fileCount - 1) / 2) * 0.24 + 0.42,
-            Math.sin(fileAngle) * fileRadius * 0.95,
-          ],
-          phase: index * 0.5 + fileIndex + 5,
-          data: { path: repo.name },
-        })
-        edges.push({ from: repoId, to: fileId, color: TYPE.code_file.color, animated: false })
-      }
-    }
-  })
-
-  const relatedEdgeSet = new Set()
-  repoList.forEach((repo) => {
-    rankRelatedRepos(repo, repoList, 2).forEach(({ repo: relatedRepo, score }) => {
-      if (score <= 0) return
-      const key = [repo.name, relatedRepo.name].sort().join('::')
-      if (relatedEdgeSet.has(key)) return
-      relatedEdgeSet.add(key)
-      edges.push({
-        from: `repo-${repo.name}`,
-        to: `repo-${relatedRepo.name}`,
-        color: '#5eead4',
-        animated: false,
-      })
-    })
-  })
-
-  const visibleStories = hnStories.slice(0, 6)
-  visibleStories.forEach((story, index) => {
-    const angle = (index / Math.max(visibleStories.length, 1)) * Math.PI * 2 + Math.PI / 6
-    const id = `hn-${index}`
-    addNode({
-      id,
-      label: `${(story.title || '').slice(0, 20)}...`,
-      type: 'news',
-      position: [
-        Math.cos(angle) * 7.4,
-        seededRange(story.title || String(index), -1.4, 1.6),
-        Math.sin(angle) * 6.8,
-      ],
-      phase: index * 1.7,
-      data: story,
-    })
-    edges.push({ from: 'core', to: id, color: TYPE.news.color, animated: index < 2 })
-  })
-
-  repoList.forEach((repo) => {
-    rankRelevantNews(repo, visibleStories, 2).forEach(({ story, score, index }) => {
-      if (score <= 0) return
-      edges.push({
-        from: `repo-${repo.name}`,
-        to: `hn-${index}`,
-        color: TYPE.news.color,
-        animated: false,
-      })
-    })
-  })
-
-  const visibleLocalDocs = localDocs.slice(0, 10)
-  visibleLocalDocs.forEach((doc, index) => {
-    const docType = doc.kind === 'local_pdf' ? 'local_pdf' : 'local_text'
-    const angle = (index / Math.max(visibleLocalDocs.length, 1)) * Math.PI * 2 - Math.PI / 8
-    const radius = 8.8 + seededRange(`${doc.id}:radius`, -0.22, 0.35) + (docType === 'local_pdf' ? 0.2 : 0)
-    const yPos = -1.6 + ((index % 4) - 1.5) * 0.7 + seededRange(`${doc.id}:y`, -0.18, 0.18)
-    const docId = `local-${hashString(doc.id || doc.title || String(index))}`
-
-    addNode({
-      id: docId,
-      label: clipLabel(doc.title || 'Local document', 24),
-      type: docType,
-      position: [
-        Math.cos(angle) * radius * 1.1,
-        yPos,
-        Math.sin(angle) * radius * 0.9,
-      ],
-      phase: 50 + index * 1.11,
-      data: doc,
-    })
-    edges.push({ from: 'core', to: docId, color: TYPE[docType].color, animated: index < 3 })
-  })
-
-  return { nodes, edges }
-}
-
-function GraphScene({ repos, hnStories, localDocs, onNodeSelect, selectedId }) {
-  const { nodes, edges } = useMemo(() => buildNeuralGraph(repos, hnStories, localDocs), [hnStories, localDocs, repos])
-  const nodeMap = useMemo(() => Object.fromEntries(nodes.map((node) => [node.id, node])), [nodes])
-
+function GraphHud({ gestureOn, gesture, spinEnabled }) {
+  const source = gesture?.source === 'opencv' ? 'OpenCV' : gesture?.source === 'browser' ? 'MediaPipe' : 'hands'
+  const waiting =
+    gesture?.source === 'opencv'
+      ? 'Waiting for OpenCV…'
+      : 'Show palm to rotate · pinch zoom · point select'
   return (
-    <>
-      <Lights />
-      <NeuralDust count={350} />
-
-      <BrainLobe position={[2.5, 0.8, 0.5]} scale={[2.8, 2.0, 2.2]} color="#00c8ff" distort={0.3} speed={1.2} />
-      <BrainLobe position={[-2.2, -0.5, 0.8]} scale={[2.5, 1.8, 2.0]} color="#a78bfa" distort={0.4} speed={0.9} />
-      <BrainLobe position={[0.5, 1.8, -1.0]} scale={[2.0, 1.5, 2.2]} color="#00ff9f" distort={0.35} speed={1.4} />
-      <BrainLobe position={[-0.8, -1.5, 1.5]} scale={[1.8, 1.4, 1.6]} color="#f0b429" distort={0.45} speed={1.1} />
-
-      <BrainCore />
-
-      {edges.map((edge, index) => {
-        const from = nodeMap[edge.from]
-        const to = nodeMap[edge.to]
-        if (!from || !to) return null
-        const isActive = selectedId && (edge.from === selectedId || edge.to === selectedId)
-        return (
-          <SynapticEdge
-            key={index}
-            start={from.position}
-            end={to.position}
-            color={edge.color || '#00c8ff'}
-            opacity={isActive ? 0.65 : 0.15}
-            animated={edge.animated || isActive}
-          />
-        )
-      })}
-
-      {nodes
-        .filter((node) => node.type !== 'core')
-        .map((node) => (
-          <NeuronNode
-            key={node.id}
-            node={node}
-            onSelect={onNodeSelect}
-            isSelected={node.id === selectedId}
-          />
-        ))}
-    </>
+    <div
+      style={{
+        position: 'absolute',
+        left: 12,
+        bottom: 12,
+        zIndex: 5,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        color: 'var(--text-dim)',
+        background: 'rgba(0,8,16,0.55)',
+        border: '1px solid rgba(0,200,255,0.12)',
+        padding: '8px 10px',
+        borderRadius: 4,
+        pointerEvents: 'none',
+        lineHeight: 1.6,
+      }}
+    >
+      {gestureOn ? (
+        <>
+          HAND · {source} · {gesture?.hands || 0}/2 · {(gesture?.gesture || 'none').toUpperCase()}
+          <br />
+          {gesture?.message || waiting}
+          {gesture?.selectTarget ? (
+            <>
+              <br />
+              AIM · {gesture.selectTarget}
+            </>
+          ) : null}
+          {gesture?.cannedGestures?.length ? (
+            <>
+              <br />
+              MP · {gesture.cannedGestures.join(' + ')}
+            </>
+          ) : null}
+          {gesture?.handGestures?.length ? (
+            <>
+              <br />
+              MAP · {gesture.handGestures.join(' + ')}
+            </>
+          ) : null}
+        </>
+      ) : (
+        <>
+          MOUSE · drag orbit · scroll zoom
+          <br />
+          KEYS · ←→↑↓ rotate · +/− zoom · 1–9 select · R reset · S spin
+          <br />
+          LAYERS · repos · purple news · gold updates
+        </>
+      )}
+      <br />
+      SPIN · {spinEnabled ? 'ON' : 'OFF'}
+    </div>
   )
 }
 
 export default function BrainGraph() {
-  const repos = useJarvisStore((state) => state.repos)
-  const hnStories = useJarvisStore((state) => state.hnStories)
-  const localDocs = useJarvisStore((state) => state.localDocs)
-  const selectedNode = useJarvisStore((state) => state.selectedNode)
-  const setSelectedNode = useJarvisStore((state) => state.setSelectedNode)
+  const graphProjection = useJarvisStore((s) => s.graphProjection)
+  const repos = useJarvisStore((s) => s.repos)
+  const hnStories = useJarvisStore((s) => s.hnStories)
+  const selectedNode = useJarvisStore((s) => s.selectedNode)
+  const setSelectedNode = useJarvisStore((s) => s.setSelectedNode)
+  const gestureControlEnabled = useJarvisStore((s) => s.gestureControlEnabled)
+  const gestureLatest = useJarvisStore((s) => s.gestureLatest)
+  const pollGestureLatest = useJarvisStore((s) => s.pollGestureLatest)
+  const graphSpinEnabled = useJarvisStore((s) => s.graphSpinEnabled)
+  const setGraphSpinEnabled = useJarvisStore((s) => s.setGraphSpinEnabled)
+
+  const controlsRef = useRef(null)
+  const rotateRef = useRef({ yaw: 0, pitch: 0 })
+  const lastSelectTs = useRef(0)
+  const [kbRotate, setKbRotate] = useState({ yaw: 0, pitch: 0 })
+  const repoNodes = useMemo(() => {
+    const names = (repos || []).map((r) => r.name).filter(Boolean)
+    return names.length ? names : FALLBACK
+  }, [repos])
+
+  useEffect(() => {
+    if (!gestureControlEnabled) return undefined
+    // Only poll backend when OpenCV script owns the session
+    const session = useJarvisStore.getState().gestureSession
+    if (gestureLatest?.source === 'browser' || session?.source === 'browser') return undefined
+    if (session?.source !== 'opencv') return undefined
+    const id = setInterval(() => {
+      pollGestureLatest()
+    }, 50)
+    return () => clearInterval(id)
+  }, [gestureControlEnabled, pollGestureLatest, gestureLatest?.source])
+
+  const handOrbitLock = Boolean(gestureControlEnabled && gestureLatest?.active)
+
+  useEffect(() => {
+    if (!gestureControlEnabled || !gestureLatest) {
+      rotateRef.current = { yaw: kbRotate.yaw, pitch: kbRotate.pitch }
+      return
+    }
+    rotateRef.current = {
+      yaw: (gestureLatest.yaw || 0) + kbRotate.yaw,
+      pitch: (gestureLatest.pitch || 0) + kbRotate.pitch,
+    }
+
+    const zoom = gestureLatest.zoom || 0
+    if (controlsRef.current && Math.abs(zoom) > 0.002) {
+      const cam = controlsRef.current.object
+      const dir = new THREE.Vector3()
+      cam.getWorldDirection(dir)
+      // Positive zoom = hands apart / expand = move camera back (pull away)
+      // Negative = minimize / pinch = move camera forward
+      const step = zoom > 0 ? -Math.abs(zoom) * 0.95 : Math.abs(zoom) * 0.95
+      cam.position.addScaledVector(dir, step)
+      // Clamp distance from origin
+      const d = cam.position.length()
+      if (d < 9) cam.position.setLength(9)
+      if (d > 28) cam.position.setLength(28)
+      controlsRef.current.update()
+    }
+
+    const sel = gestureLatest.select || 0
+    const now = Date.now()
+    if (sel && now - lastSelectTs.current > 450) {
+      lastSelectTs.current = now
+      if (sel === -1 && controlsRef.current) {
+        controlsRef.current.reset()
+        setSelectedNode(null)
+      } else if (sel === -2) {
+        setSelectedNode(null)
+      } else if (sel === 2) {
+        setGraphSpinEnabled(!useJarvisStore.getState().graphSpinEnabled)
+      } else if (sel === 3 && controlsRef.current) {
+        // Expand — pull camera back
+        const cam = controlsRef.current.object
+        const dir = new THREE.Vector3()
+        cam.getWorldDirection(dir)
+        cam.position.addScaledVector(dir, -2.2)
+        if (cam.position.length() > 26) cam.position.setLength(26)
+        controlsRef.current.update()
+      } else if (sel === 4 && controlsRef.current) {
+        // Minimize — push in
+        const cam = controlsRef.current.object
+        const dir = new THREE.Vector3()
+        cam.getWorldDirection(dir)
+        cam.position.addScaledVector(dir, 2.0)
+        if (cam.position.length() < 10) cam.position.setLength(10)
+        controlsRef.current.update()
+      } else if (sel === 1) {
+        const name =
+          gestureLatest.selectTarget ||
+          (typeof gestureLatest.hoverIndex === 'number' ? repoNodes[gestureLatest.hoverIndex] : null)
+        if (name) {
+          const repo = (repos || []).find((r) => r.name === name) || { name }
+          setSelectedNode({ id: `repo:${name}`, label: name, type: 'repo', data: repo })
+        }
+      }
+    }
+  }, [
+    gestureControlEnabled,
+    gestureLatest,
+    kbRotate,
+    repoNodes,
+    repos,
+    setSelectedNode,
+    setGraphSpinEnabled,
+  ])
+
+  useEffect(() => {
+    const down = (e) => {
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (e.key === 'ArrowLeft') setKbRotate((r) => ({ ...r, yaw: -0.9 }))
+      if (e.key === 'ArrowRight') setKbRotate((r) => ({ ...r, yaw: 0.9 }))
+      if (e.key === 'ArrowUp') setKbRotate((r) => ({ ...r, pitch: -0.7 }))
+      if (e.key === 'ArrowDown') setKbRotate((r) => ({ ...r, pitch: 0.7 }))
+      if (e.key === '=' || e.key === '+') {
+        if (controlsRef.current) {
+          const cam = controlsRef.current.object
+          const dir = new THREE.Vector3()
+          cam.getWorldDirection(dir)
+          cam.position.addScaledVector(dir, 0.4)
+          controlsRef.current.update()
+        }
+      }
+      if (e.key === '-' || e.key === '_') {
+        if (controlsRef.current) {
+          const cam = controlsRef.current.object
+          const dir = new THREE.Vector3()
+          cam.getWorldDirection(dir)
+          cam.position.addScaledVector(dir, -0.4)
+          controlsRef.current.update()
+        }
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        controlsRef.current?.reset?.()
+        setSelectedNode(null)
+      }
+      if (e.key === 's' || e.key === 'S') {
+        setGraphSpinEnabled(!useJarvisStore.getState().graphSpinEnabled)
+      }
+      if (e.key >= '1' && e.key <= '9') {
+        const idx = Number(e.key) - 1
+        const name = repoNodes[idx]
+        if (name) {
+          const repo = (repos || []).find((r) => r.name === name) || { name }
+          setSelectedNode({ id: `repo:${name}`, label: name, type: 'repo', data: repo })
+        }
+      }
+    }
+    const up = (e) => {
+      if (['ArrowLeft', 'ArrowRight'].includes(e.key)) setKbRotate((r) => ({ ...r, yaw: 0 }))
+      if (['ArrowUp', 'ArrowDown'].includes(e.key)) setKbRotate((r) => ({ ...r, pitch: 0 }))
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [repoNodes, repos, setSelectedNode, setGraphSpinEnabled])
 
   return (
-    <Canvas
-      camera={{ position: [0, 3, 11], fov: 58, near: 0.1, far: 120 }}
-      gl={{ antialias: true, alpha: true, logarithmicDepthBuffer: true }}
-      style={{ background: 'transparent' }}
-    >
-      <GraphScene
-        repos={repos}
-        hnStories={hnStories}
-        localDocs={localDocs}
-        onNodeSelect={setSelectedNode}
-        selectedId={selectedNode?.id}
-      />
-      <OrbitControls
-        enablePan={false}
-        minDistance={4.5}
-        maxDistance={20}
-        autoRotate
-        autoRotateSpeed={0.35}
-        enableDamping
-        dampingFactor={0.04}
-        maxPolarAngle={Math.PI * 0.8}
-        minPolarAngle={Math.PI * 0.2}
-      />
-    </Canvas>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <Canvas
+        camera={{ position: [0, 0.6, 13.5], fov: 38, near: 0.1, far: 140 }}
+        gl={{ antialias: true, alpha: true }}
+        style={{ background: 'transparent' }}
+        onPointerMissed={() => setSelectedNode(null)}
+        tabIndex={0}
+      >
+        <color attach="background" args={[BG]} />
+        <fog attach="fog" args={[BG, 14, 36]} />
+        <Scene
+          graphProjection={graphProjection}
+          repos={repos}
+          hnStories={hnStories}
+          selectedId={selectedNode?.id}
+          onSelect={setSelectedNode}
+          spinEnabled={graphSpinEnabled}
+          rotateRef={rotateRef}
+        />
+        <OrbitControls
+          ref={controlsRef}
+          enablePan={false}
+          enableRotate={!handOrbitLock}
+          minDistance={9}
+          maxDistance={22}
+          enableDamping
+          dampingFactor={0.05}
+          target={[0, 0, 0]}
+        />
+      </Canvas>
+      <GraphHud gestureOn={gestureControlEnabled} gesture={gestureLatest} spinEnabled={graphSpinEnabled} />
+    </div>
   )
 }

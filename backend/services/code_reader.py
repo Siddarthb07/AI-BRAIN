@@ -21,8 +21,17 @@ SKIP_PATHS = {
 }
 
 MAX_FILE_SIZE = 40_000   # chars per file
-MAX_FILES_PER_REPO = 30  # don't blow up the context window
-MAX_TOTAL_CHARS = 200_000
+MAX_FILES_PER_REPO = 45
+MAX_TOTAL_CHARS = 280_000
+MAX_MARKDOWN_FILES = 3
+
+# Doc noise that fills the budget on research repos
+SKIP_DOC_NAMES = {
+    'code_of_conduct.md', 'security.md', 'contributing.md', 'changelog.md',
+    'license', 'license.md', 'licence', 'licence.md', 'authors.md',
+    'dependabot.yml', 'funding.yml',
+}
+
 
 def _headers():
     h = {"Accept": "application/vnd.github.v3+json", "User-Agent": "JARVIS-Brain/1.0"}
@@ -35,6 +44,8 @@ def _should_read(path: str) -> bool:
     if any(p in SKIP_PATHS for p in parts):
         return False
     name = parts[-1]
+    if name in SKIP_DOC_NAMES or name.startswith('.'):
+        return False
     ext = '.' + name.rsplit('.', 1)[-1] if '.' in name else name
     return ext in CODE_EXTENSIONS or name in CODE_EXTENSIONS
 
@@ -88,24 +99,41 @@ async def deep_ingest_repo(owner: str, repo: str) -> List[Dict]:
     tree = await fetch_file_tree(owner, repo)
     readable = [t for t in tree if _should_read(t["path"])]
 
-    # Prioritise: entry points, main files, key configs first
+    # Prefer real code/entrypoints; cap nested READMEs so docs don't starve source
     def priority(item):
         p = item["path"].lower()
-        if any(k in p for k in ["main.", "app.", "index.", "readme", "requirements", "package.json", "setup.py", "cargo.toml"]):
-            return 0
-        if p.count('/') == 0:
-            return 1   # root level
-        if p.count('/') == 1:
-            return 2
-        return 3
+        name = p.rsplit('/', 1)[-1]
+        depth = p.count('/')
+        if name in ('main.py', 'app.py', 'server.py', 'index.ts', 'index.js', 'main.go', 'main.rs'):
+            return (0, depth, p)
+        if name in ('readme.md', 'pyproject.toml', 'package.json', 'requirements.txt', 'cargo.toml', 'setup.py'):
+            return (1, depth, p)
+        if name.endswith(('.py', '.ts', '.tsx', '.js', '.jsx', '.go', '.rs')):
+            return (2, depth, p)
+        if name.endswith('.md'):
+            return (8, depth, p)
+        if depth == 0:
+            return (3, depth, p)
+        return (4, depth, p)
 
     readable.sort(key=priority)
-    readable = readable[:MAX_FILES_PER_REPO]
+    selected = []
+    md_count = 0
+    for item in readable:
+        path = item["path"]
+        is_md = path.lower().endswith('.md')
+        if is_md:
+            if md_count >= MAX_MARKDOWN_FILES:
+                continue
+            md_count += 1
+        selected.append(item)
+        if len(selected) >= MAX_FILES_PER_REPO:
+            break
 
     chunks = []
     total_chars = 0
 
-    for item in readable:
+    for item in selected:
         if total_chars >= MAX_TOTAL_CHARS:
             break
         path = item["path"]

@@ -1,13 +1,15 @@
 'use client'
 import { useMemo } from 'react'
 import { useJarvisStore } from '../app/store'
-import { enrichRepo, rankRelatedRepos, rankRelevantNews, scoreNewsForRepo } from '../lib/knowledge'
+import { enrichRepo, rankRelatedRepos, rankRelevantNews, repoUpdateItems, scoreNewsForRepo } from '../lib/knowledge'
 
 const TYPE_COLORS = {
   repo: 'var(--green)',
   topic: 'var(--gold)',
   lang: '#a78bfa',
   news: '#ff6b9d',
+  update: 'var(--gold)',
+  fyi: 'var(--gold)',
   core: 'var(--cyan)',
   local_text: '#38bdf8',
   local_pdf: '#ff8a3d',
@@ -16,6 +18,8 @@ const TYPE_COLORS = {
 const TYPE_LABELS = {
   local_text: 'LOCAL TEXT NODE',
   local_pdf: 'LOCAL PDF NODE',
+  update: 'UPDATE',
+  fyi: 'UPDATE',
 }
 
 function Section({ title, children }) {
@@ -52,6 +56,7 @@ export default function NodePanel() {
   const setSelectedNode = useJarvisStore((state) => state.setSelectedNode)
   const sendChat = useJarvisStore((state) => state.sendChat)
   const setActivePanel = useJarvisStore((state) => state.setActivePanel)
+  const setShellMode = useJarvisStore((state) => state.setShellMode)
   const repos = useJarvisStore((state) => state.repos)
   const hnStories = useJarvisStore((state) => state.hnStories)
 
@@ -83,6 +88,16 @@ export default function NodePanel() {
     }
     return []
   }, [enrichedSelectedRepo, hnStories, selectedNode])
+
+  const updateItems = useMemo(() => {
+    if (selectedNode?.type === 'repo' && enrichedSelectedRepo) {
+      return repoUpdateItems(enrichedSelectedRepo, 3).map((u) => u.text)
+    }
+    if ((selectedNode?.type === 'update' || selectedNode?.type === 'fyi') && selectedNode.data?.text) {
+      return [selectedNode.data.text]
+    }
+    return []
+  }, [enrichedSelectedRepo, selectedNode])
 
   if (!selectedNode) {
     return (
@@ -117,10 +132,13 @@ export default function NodePanel() {
         ? `Tell me about my ${label} project. What are the key technical decisions and how can I improve it?`
         : type === 'news'
         ? `Explain this story and why it matters for my work: "${data?.title || label}"`
+        : type === 'update' || type === 'fyi'
+        ? `Act on this update for my work: "${data?.text || label}"${data?.repo ? ` (repo: ${data.repo})` : ''}`
         : type === 'local_pdf' || type === 'local_text'
         ? `Analyze this ingested document for me: "${displayLabel}". Summarize the important ideas and how they connect to my current projects.`
         : `How does ${label} relate to my current projects and what should I know about it?`
 
+    setShellMode('work')
     setActivePanel('chat')
     await sendChat(question)
   }
@@ -407,6 +425,25 @@ export default function NodePanel() {
         </div>
       )}
 
+      {(type === 'update' || type === 'fyi') && data?.text ? (
+        <div
+          style={{
+            fontFamily: 'var(--font-body)',
+            fontSize: '14px',
+            color: 'var(--text-secondary)',
+            marginBottom: '14px',
+            lineHeight: 1.5,
+          }}
+        >
+          {data.text}
+          {data.repo ? (
+            <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--gold)' }}>
+              REPO · {data.repo}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {relatedRepos.length > 0 && (
         <Section title={type === 'news' ? 'RELATED REPOS' : 'SIMILAR REPOS'}>
           {relatedRepos.map(({ repo, score }) => (
@@ -421,7 +458,7 @@ export default function NodePanel() {
       )}
 
       {relatedNews.length > 0 && (
-        <Section title="RELEVANT NEWS">
+        <Section title="REFERENCE NEWS (3)">
           {relatedNews.map(({ story, score, index }) => (
             <JumpButton
               key={`${story.title}-${index}`}
@@ -429,6 +466,27 @@ export default function NodePanel() {
               color="#ff6b9d"
               onClick={() => openNewsNode(story, index)}
             />
+          ))}
+        </Section>
+      )}
+
+      {updateItems.length > 0 && type === 'repo' && (
+        <Section title="UPDATES (3)">
+          {updateItems.map((item) => (
+            <div
+              key={item}
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.45,
+                marginBottom: 10,
+                paddingBottom: 8,
+                borderBottom: '1px solid rgba(240,180,41,0.12)',
+              }}
+            >
+              {item}
+            </div>
           ))}
         </Section>
       )}

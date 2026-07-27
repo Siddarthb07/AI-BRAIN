@@ -2,8 +2,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useJarvisStore } from '../app/store'
 import { AMERICAN_VOICE_MATCHERS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
+import { API_BASE } from '../lib/api'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const API = API_BASE
 const STATES = { idle: 'idle', recording: 'recording', processing: 'processing', speaking: 'speaking' }
 
 export default function VoicePanel() {
@@ -35,53 +36,21 @@ export default function VoicePanel() {
     return () => clearInterval(animRef.current)
   }, [state])
 
-  const startRecording = async () => {
-    setError('')
-    setTranscript('')
-    setResponse('')
-
-    // Try browser Web Speech API first (always available)
-    if (window.SpeechRecognition || window.webkitSpeechRecognition) {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-      const recognition = new SR()
-      recognition.continuous = false
-      recognition.interimResults = false
-      recognition.lang = 'en-US'
-      recognitionRef.current = recognition
-
-      recognition.onstart = () => setState(STATES.recording)
-      recognition.onresult = async (event) => {
-        const text = event.results[0][0].transcript
-        setTranscript(text)
-        setState(STATES.processing)
-        await processText(text)
-      }
-      recognition.onerror = (e) => {
-        setError(`Speech recognition error: ${e.error}`)
-        setState(STATES.idle)
-      }
-      recognition.onend = () => {
-        setState((current) => current === STATES.recording ? STATES.idle : current)
-      }
-      recognition.start()
-      return
-    }
-
-    // Fallback: MediaRecorder → Whisper backend
+  const startWhisperCapture = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
       chunksRef.current = []
-      recorder.ondataavailable = e => chunksRef.current.push(e.data)
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data)
       recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop())
+        stream.getTracks().forEach((t) => t.stop())
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setState(STATES.processing)
-        // Send to Whisper backend
         const form = new FormData()
         form.append('file', blob, 'audio.webm')
         try {
           const res = await fetch(`${API}/voice/input`, { method: 'POST', body: form })
+          if (!res.ok) throw new Error(`STT HTTP ${res.status}`)
           const data = await res.json()
           const text = data.text || ''
           if (text) {
@@ -92,17 +61,69 @@ export default function VoicePanel() {
             setState(STATES.idle)
           }
         } catch (e) {
-          setError('Backend STT failed. Check that backend is running.')
+          setError(`Voice backend error (${API}). Is JARVIS API on :8002 running?`)
           setState(STATES.idle)
         }
       }
       mediaRef.current = recorder
       recorder.start()
       setState(STATES.recording)
+      setVoiceState('recording')
     } catch (e) {
       setError('Microphone access denied. Please allow microphone access.')
       setState(STATES.idle)
     }
+  }
+
+  const startRecording = async () => {
+    setError('')
+    setTranscript('')
+    setResponse('')
+
+    // Browser Web Speech — often fails with "network" without Google STT; fall back to Whisper
+    if (!useBackend && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+      const recognition = new SR()
+      recognition.continuous = false
+      recognition.interimResults = false
+      recognition.lang = 'en-US'
+      recognitionRef.current = recognition
+
+      recognition.onstart = () => {
+        setState(STATES.recording)
+        setVoiceState('recording')
+      }
+      recognition.onresult = async (event) => {
+        const text = event.results[0][0].transcript
+        setTranscript(text)
+        setState(STATES.processing)
+        await processText(text)
+      }
+      recognition.onerror = async (e) => {
+        const code = e?.error || 'unknown'
+        if (code === 'network' || code === 'service-not-allowed' || code === 'not-allowed') {
+          setError('Browser STT unavailable — using Whisper backend…')
+          setUseBackend(true)
+          await startWhisperCapture()
+          return
+        }
+        setError(`Speech recognition error: ${code}`)
+        setState(STATES.idle)
+        setVoiceState('idle')
+      }
+      recognition.onend = () => {
+        setState((current) => (current === STATES.recording ? STATES.idle : current))
+      }
+      try {
+        recognition.start()
+        return
+      } catch {
+        await startWhisperCapture()
+        return
+      }
+    }
+
+    await startWhisperCapture()
   }
 
   const stopRecording = () => {
@@ -129,8 +150,9 @@ export default function VoicePanel() {
     const started = await playSpeech(text, {
       preferBrowser: !useBackend,
       preferBackend: useBackend,
-      backendMaxChars: 500,
-      browserMaxChars: 400,
+      backendMaxChars: 1000,
+      browserMaxChars: 1000,
+      browserChunkSize: 360,
       lang: 'en-US',
       rate: 0.98,
       pitch: 1,

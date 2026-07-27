@@ -1,7 +1,8 @@
 import json
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services import chat_history, jarvis_orchestrator, vault
@@ -24,18 +25,43 @@ class SaveChatRequest(BaseModel):
 class ConfirmActionRequest(BaseModel):
     action_id: str
     session_id: Optional[str] = None
+    confirm_token: Optional[str] = None
+
+
+class CreateSessionRequest(BaseModel):
+    title: str = "New chat"
+
+
+@router.post("/stream")
+async def chat_stream(payload: ChatMessage):
+    """Real SSE token stream from Ollama/Groq via orchestrator."""
+    if not payload.message.strip():
+        raise HTTPException(400, "Message is empty")
+
+    async def event_gen():
+        async for event in jarvis_orchestrator.run_chat_stream(
+            payload.message,
+            session_id=payload.session_id,
+            include_context=payload.include_context,
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 @router.get("/stream")
-async def chat_stream(message: str, session_id: Optional[str] = None):
-    """SSE streaming stub — streams full reply when Ollama available."""
+async def chat_stream_get(message: str, session_id: Optional[str] = None):
+    """GET SSE for simple clients — prefer POST /chat/stream."""
+    if not message.strip():
+        raise HTTPException(400, "Message is empty")
 
     async def event_gen():
-        result = await jarvis_orchestrator.run_chat(message, session_id=session_id)
-        yield f"data: {{\"type\":\"token\",\"text\":{json.dumps(result['reply'])}}}\n\n"
-        yield f"data: {{\"type\":\"done\",\"session_id\":{json.dumps(result['session_id'])}}}\n\n"
-
-    from fastapi.responses import StreamingResponse
+        async for event in jarvis_orchestrator.run_chat_stream(
+            message,
+            session_id=session_id,
+            include_context=True,
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -66,7 +92,11 @@ async def save_message(payload: SaveChatRequest):
 
 @router.post("/action/confirm")
 async def confirm_action(payload: ConfirmActionRequest):
-    return await jarvis_orchestrator.confirm_action(payload.action_id, payload.session_id)
+    return await jarvis_orchestrator.confirm_action(
+        payload.action_id,
+        payload.session_id,
+        payload.confirm_token,
+    )
 
 
 @router.get("/sessions")
@@ -75,7 +105,8 @@ async def list_sessions():
 
 
 @router.post("/sessions")
-async def create_session(title: str = "New chat"):
+async def create_session(payload: CreateSessionRequest = CreateSessionRequest()):
+    title = payload.title or "New chat"
     return chat_history.create_session(title)
 
 

@@ -12,55 +12,93 @@ import VoicePanel from '../components/VoicePanel'
 import StudioPanel from '../components/StudioPanel'
 import LocalIngestPanel from '../components/LocalIngestPanel'
 import NodePanel from '../components/NodePanel'
+import DashboardPanel from '../components/DashboardPanel'
+import HousePanel from '../components/HousePanel'
+import VisionPanel from '../components/VisionPanel'
+import WakePanel, { WakeRuntime } from '../components/WakePanel'
+import GestureRuntime from '../components/GestureRuntime'
 
 const BrainGraph = lazy(() => import('../components/BrainGraph'))
 
-const RAIL = [
+const SHELL_RAIL = [
+  { id: 'dashboard', label: 'Dash' },
+  { id: 'work', label: 'Work' },
+  { id: 'lab', label: 'Lab' },
+]
+
+const WORK_RAIL = [
   { id: 'chat', label: 'Chat' },
   { id: 'brief', label: 'Brief' },
   { id: 'vault', label: 'Vault' },
   { id: 'calendar', label: 'Cal' },
-  { id: 'ingest', label: 'Ingest' },
   { id: 'voice', label: 'Voice' },
+  { id: 'house', label: 'House' },
+]
+
+const LAB_RAIL = [
+  { id: 'studio', label: 'Studio' },
+  { id: 'ingest', label: 'Ingest' },
   { id: 'graph', label: 'Graph' },
+  { id: 'vision', label: 'Vision' },
+  { id: 'wake', label: 'Wake' },
 ]
 
 function ThreadSidebar() {
   const chatSessions = useJarvisStore((s) => s.chatSessions)
   const sessionId = useJarvisStore((s) => s.sessionId)
+  const chatHistory = useJarvisStore((s) => s.chatHistory)
   const loadChatSession = useJarvisStore((s) => s.loadChatSession)
+  const createChatSession = useJarvisStore((s) => s.createChatSession)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '10px' }}>
       <div className="section-header" style={{ marginBottom: '8px' }}>
         THREADS
       </div>
-      <button type="button" className="btn" style={{ fontSize: '10px', marginBottom: '10px' }} onClick={() => loadChatSession()}>
-        + REFRESH
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginBottom: 8 }}>
+        {chatSessions.length} sessions · {chatHistory.length} msgs
+      </div>
+      <button
+        type="button"
+        className="btn btn-gold"
+        style={{ fontSize: '10px', marginBottom: '6px' }}
+        onClick={() => createChatSession('New chat')}
+      >
+        + NEW
       </button>
-      <div className="scroll-area" style={{ flex: 1 }}>
+      <button type="button" className="btn" style={{ fontSize: '10px', marginBottom: '10px' }} onClick={() => loadChatSession()}>
+        ↺ REFRESH
+      </button>
+      <div className="scroll-area" style={{ flex: 1, minHeight: 0 }}>
         {(chatSessions.length ? chatSessions : [{ id: sessionId, title: 'Current' }]).map((s) => (
-          <div
+          <button
             key={s.id || 'current'}
+            type="button"
+            onClick={() => s.id && loadChatSession(s.id)}
             style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
               padding: '8px',
               marginBottom: '4px',
               borderRadius: '4px',
-              background: s.id === sessionId ? 'rgba(0,200,255,0.08)' : 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              background: s.id === sessionId ? 'rgba(0,200,255,0.12)' : 'transparent',
               fontFamily: 'var(--font-mono)',
               fontSize: '10px',
-              color: 'var(--text-secondary)',
+              color: s.id === sessionId ? 'var(--cyan)' : 'var(--text-secondary)',
             }}
           >
             {s.title || 'Chat'}
-          </div>
+          </button>
         ))}
       </div>
     </div>
   )
 }
 
-function IconRail({ active, onSelect }) {
+function IconRail({ items, active, onSelect }) {
   return (
     <div
       style={{
@@ -75,7 +113,7 @@ function IconRail({ active, onSelect }) {
         background: 'rgba(0,4,8,0.6)',
       }}
     >
-      {RAIL.map((tab) => (
+      {items.map((tab) => (
         <button
           key={tab.id}
           type="button"
@@ -102,8 +140,41 @@ function IconRail({ active, onSelect }) {
 
 function BrainLoading() {
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--text-dim)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '10px',
+      }}
+    >
       Loading knowledge map...
+    </div>
+  )
+}
+
+function StubPanel({ title, body }) {
+  return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+      <div
+        className="panel"
+        style={{
+          maxWidth: 420,
+          padding: '28px 24px',
+          textAlign: 'center',
+        }}
+      >
+        <div className="section-header" style={{ borderBottom: 'none', marginBottom: '8px' }}>
+          {title}
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          {body}
+        </div>
+      </div>
     </div>
   )
 }
@@ -111,8 +182,10 @@ function BrainLoading() {
 export default function Page() {
   const activePanel = useJarvisStore((s) => s.activePanel)
   const setActivePanel = useJarvisStore((s) => s.setActivePanel)
-  const layoutMode = useJarvisStore((s) => s.layoutMode)
+  const shellMode = useJarvisStore((s) => s.shellMode)
+  const setShellMode = useJarvisStore((s) => s.setShellMode)
   const setLayoutMode = useJarvisStore((s) => s.setLayoutMode)
+  const selectedNode = useJarvisStore((s) => s.selectedNode)
   const repos = useJarvisStore((s) => s.repos)
   const knowledgeDocs = useJarvisStore((s) => s.knowledgeDocs)
   const vaultNotes = useJarvisStore((s) => s.vaultNotes)
@@ -125,9 +198,14 @@ export default function Page() {
   const loadChatSession = useJarvisStore((s) => s.loadChatSession)
   const fetchVaultNotes = useJarvisStore((s) => s.fetchVaultNotes)
   const fetchVaultStatus = useJarvisStore((s) => s.fetchVaultStatus)
+  const fetchHouseStatus = useJarvisStore((s) => s.fetchHouseStatus)
+  const fetchGraph = useJarvisStore((s) => s.fetchGraph)
+  const fetchContext = useJarvisStore((s) => s.fetchContext)
 
   const nodeCount = (repos?.length || 0) + (vaultNotes?.length || 0) + (knowledgeDocs || 0)
-  const showMiniMap = nodeCount > 0 && activePanel !== 'graph'
+  const showMiniMap = shellMode === 'work' && nodeCount > 0 && activePanel === 'chat'
+  const showNodePanel =
+    Boolean(selectedNode) && (shellMode === 'dashboard' || (shellMode === 'lab' && activePanel === 'graph'))
 
   useEffect(() => {
     checkBackendHealth({ silent: true, repairStatus: true })
@@ -138,6 +216,9 @@ export default function Page() {
     fetchExternal()
     fetchGoogleCalendarStatus({ silent: true })
     pollIngestStatus()
+    fetchHouseStatus()
+    fetchGraph()
+    fetchContext()
     const t1 = setInterval(pollIngestStatus, 15000)
     const t2 = setInterval(() => checkBackendHealth({ silent: true }), 20000)
     return () => {
@@ -147,25 +228,47 @@ export default function Page() {
   }, [
     checkBackendHealth,
     fetchBrief,
+    fetchContext,
     fetchExternal,
     fetchGoogleCalendarStatus,
+    fetchGraph,
+    fetchHouseStatus,
     fetchVaultNotes,
     fetchVaultStatus,
     loadChatSession,
     pollIngestStatus,
   ])
 
-  const onRailSelect = (id) => {
-    if (id === 'graph') {
-      setLayoutMode('graph')
-      setActivePanel('graph')
-    } else {
+  const onShellSelect = (id) => {
+    setShellMode(id)
+    if (id === 'dashboard') {
+      setLayoutMode('dashboard')
+    } else if (id === 'work') {
       setLayoutMode('work')
-      setActivePanel(id)
+      if (!['chat', 'brief', 'vault', 'calendar', 'voice', 'house'].includes(activePanel)) {
+        setActivePanel('chat')
+      }
+    } else if (id === 'lab') {
+      setLayoutMode('lab')
+      if (!['studio', 'ingest', 'graph', 'vision', 'wake'].includes(activePanel)) {
+        setActivePanel('studio')
+      }
     }
   }
 
-  const renderMain = () => {
+  const onWorkSelect = (id) => {
+    setShellMode('work')
+    setLayoutMode('work')
+    setActivePanel(id)
+  }
+
+  const onLabSelect = (id) => {
+    setShellMode('lab')
+    setLayoutMode(id === 'graph' ? 'graph' : 'lab')
+    setActivePanel(id)
+  }
+
+  const renderWorkMain = () => {
     switch (activePanel) {
       case 'brief':
         return <BriefPanel />
@@ -175,6 +278,16 @@ export default function Page() {
         return <CalendarPanel />
       case 'voice':
         return <VoicePanel />
+      case 'house':
+        return <HousePanel />
+      case 'chat':
+      default:
+        return <ChatPanel />
+    }
+  }
+
+  const renderLabMain = () => {
+    switch (activePanel) {
       case 'ingest':
         return <LocalIngestPanel />
       case 'graph':
@@ -183,13 +296,17 @@ export default function Page() {
             <BrainGraph />
           </Suspense>
         )
-      case 'chat':
+      case 'vision':
+        return <VisionPanel />
+      case 'wake':
+        return <WakePanel />
+      case 'studio':
       default:
-        return <ChatPanel />
+        return <StudioPanel />
     }
   }
 
-  const rightPanel =
+  const workRightPanel =
     activePanel === 'chat' ? (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', borderBottom: '1px solid rgba(0,200,255,0.08)' }}>
@@ -201,46 +318,115 @@ export default function Page() {
       </div>
     ) : null
 
-  if (layoutMode === 'graph' || activePanel === 'graph') {
-    return (
-      <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)' }}>
-        <HUD />
-        <div style={{ flex: 1, marginTop: 52, display: 'flex', minHeight: 0 }}>
-          <IconRail active="graph" onSelect={onRailSelect} />
-          <div style={{ flex: 1, position: 'relative' }}>
-            <Suspense fallback={<BrainLoading />}>
-              <BrainGraph />
-            </Suspense>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)', overflow: 'hidden' }}>
+      <WakeRuntime />
+      <GestureRuntime />
       <HUD />
       {healthState.demo_mode ? (
-        <div style={{ marginTop: 52, background: 'rgba(240,180,41,0.15)', color: 'var(--gold)', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px' }}>
+        <div
+          style={{
+            marginTop: 52,
+            background: 'rgba(240,180,41,0.15)',
+            color: 'var(--gold)',
+            textAlign: 'center',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            padding: '4px',
+          }}
+        >
           DEMO MODE — sample data may appear
         </div>
       ) : null}
-      {!healthState.ollama && !healthState.demo_mode ? (
-        <div style={{ background: 'rgba(255,56,96,0.12)', color: 'var(--red)', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px', marginTop: healthState.demo_mode ? 0 : 52 }}>
-          Ollama offline — start Ollama for LLM replies
+      {!healthState.ollama && !healthState.groq && !healthState.demo_mode ? (
+        <div
+          style={{
+            background: 'rgba(255,56,96,0.12)',
+            color: 'var(--red)',
+            textAlign: 'center',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            padding: '4px',
+            marginTop: healthState.demo_mode ? 0 : 52,
+          }}
+        >
+          LLM offline — Groq unreachable or rate-limited; start Ollama as backup
         </div>
       ) : null}
-      <div style={{ flex: 1, display: 'flex', marginTop: healthState.demo_mode || !healthState.ollama ? 0 : 52, minHeight: 0 }}>
-        <IconRail active={activePanel} onSelect={onRailSelect} />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <AppShell sidebar={activePanel === 'chat' ? <ThreadSidebar /> : null} rightPanel={rightPanel} miniMap={showMiniMap ? (
-            <Suspense fallback={<BrainLoading />}>
-              <BrainGraph />
-            </Suspense>
-          ) : null}>
-            {renderMain()}
-          </AppShell>
-        </div>
+
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          marginTop: healthState.demo_mode || (!healthState.ollama && !healthState.groq) ? 0 : 52,
+          minHeight: 0,
+        }}
+      >
+        <IconRail items={SHELL_RAIL} active={shellMode} onSelect={onShellSelect} />
+
+        {shellMode === 'dashboard' ? (
+          <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+              <DashboardPanel />
+            </div>
+            {showNodePanel ? (
+              <div
+                style={{
+                  width: 320,
+                  flexShrink: 0,
+                  borderLeft: '1px solid rgba(0,200,255,0.1)',
+                  background: 'rgba(0,4,8,0.85)',
+                  overflow: 'hidden',
+                }}
+              >
+                <NodePanel />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {shellMode === 'work' ? (
+          <>
+            <IconRail items={WORK_RAIL} active={activePanel} onSelect={onWorkSelect} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <AppShell
+                sidebar={activePanel === 'chat' ? <ThreadSidebar /> : null}
+                rightPanel={workRightPanel}
+                miniMap={
+                  showMiniMap ? (
+                    <Suspense fallback={<BrainLoading />}>
+                      <BrainGraph />
+                    </Suspense>
+                  ) : null
+                }
+              >
+                {renderWorkMain()}
+              </AppShell>
+            </div>
+          </>
+        ) : null}
+
+        {shellMode === 'lab' ? (
+          <>
+            <IconRail items={LAB_RAIL} active={activePanel} onSelect={onLabSelect} />
+            <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>{renderLabMain()}</div>
+              {showNodePanel ? (
+                <div
+                  style={{
+                    width: 320,
+                    flexShrink: 0,
+                    borderLeft: '1px solid rgba(0,200,255,0.1)',
+                    background: 'rgba(0,4,8,0.85)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <NodePanel />
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   )

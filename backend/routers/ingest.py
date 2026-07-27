@@ -28,7 +28,8 @@ async def _ingest_repo_bg(owner: str, repo: str, deep: bool = True):
     store.add_repo(repo_data)
 
     readme = await gh_service.fetch_readme(owner, repo)
-    base_text = gh_service.build_repo_text(repo_data) + "\n\n" + readme[:2000]
+    readme_excerpt = (readme or "")[:8000]
+    base_text = gh_service.build_repo_text(repo_data) + "\n\n" + readme_excerpt[:6000]
     await rag.add_document(base_text, {"source": f"github:{owner}/{repo}", "type": "repo_meta", "name": repo, "owner": owner})
     store.increment_knowledge()
 
@@ -50,7 +51,16 @@ async def _ingest_repo_bg(owner: str, repo: str, deep: bool = True):
             "patterns": structure["detected_patterns"]})
         store.increment_knowledge()
 
-        enriched = {**repo_data, "patterns": structure["detected_patterns"], "file_count": structure["file_count"]}
+        enriched = {
+            **repo_data,
+            "patterns": structure["detected_patterns"],
+            "file_count": structure["file_count"],
+            "languages": structure.get("languages") or {},
+            "entry_points": structure.get("entry_points") or [],
+            "key_imports": structure.get("key_imports") or [],
+            "readme_excerpt": readme_excerpt,
+            "structure_summary": struct_text,
+        }
         store.add_repo(enriched)
 
         for chunk in chunks:
@@ -60,6 +70,8 @@ async def _ingest_repo_bg(owner: str, repo: str, deep: bool = True):
             store.increment_knowledge()
 
         print(f"[Ingest] Done: {owner}/{repo} -- {len(chunks)} files")
+    else:
+        store.add_repo({**repo_data, "readme_excerpt": readme_excerpt})
 
 @router.post("/github")
 async def ingest_single_repo(payload: RepoPayload, background_tasks: BackgroundTasks):

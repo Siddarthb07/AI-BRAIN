@@ -1,6 +1,8 @@
 # JARVIS AI Brain
 
-> Local-first AI command system — 3D brain graph, daily briefs, voice I/O, RAG chat.
+> Local-first JARVIS OS v2 — Dashboard brain map, daily briefs, voice I/O, RAG chat, SimulatedHouse + Home Assistant adapter.
+
+See **[DEMO.md](DEMO.md)** for the 5-minute walkthrough and **[SECURITY.md](SECURITY.md)** for G0–G12 gates.
 
 ---
 
@@ -8,15 +10,16 @@
 
 | Layer | Tech |
 |---|---|
-| Backend | FastAPI + Python 3.11 |
+| Backend | FastAPI + Python 3.9+ |
 | LLM | Ollama (llama3.2) + Groq fallback |
 | Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
 | Vector DB | Qdrant (Docker) |
 | STT | Web Speech API → Whisper |
 | TTS | American-voice pyttsx3 / Coqui → Browser SpeechSynthesis |
-| Frontend | Next.js 14 |
+| Frontend | Next.js 14 — Dashboard / Work / Lab |
 | 3D | React Three Fiber + Three.js |
-| State | Zustand |
+| House | SimulatedEnvironment + Home Assistant adapter |
+| State | Zustand + SQLite action queue |
 
 ---
 
@@ -24,28 +27,37 @@
 
 ### Prerequisites
 
-1. **Docker Desktop** — running
-2. **Ollama** — [ollama.com](https://ollama.com) — installed and running
+1. **Docker Desktop** — for Qdrant (optional but recommended)
+2. **Ollama** — [ollama.com](https://ollama.com) — `ollama pull llama3.2`
+3. **Node.js 20+** and **Python 3.9+**
 
-```bash
-# Pull the default LLM
-ollama pull llama3.2
-```
-
-3. **Node.js 20+** — [nodejs.org](https://nodejs.org)
-
-### Launch
+### Local (recommended while iterating)
 
 ```batch
-# Option A — double-click
-start.bat
-
-# Option B — manual
 copy .env.example .env
-docker-compose up --build -d
+REM set JARVIS_MASTER_KEY=... in .env
+
+docker start jarvis-qdrant
+
+cd backend
+pip install -r requirements.txt
+python -m uvicorn main:app --host 127.0.0.1 --port 8002 --reload
+
+cd ..\frontend
+echo NEXT_PUBLIC_API_URL=http://localhost:8002> .env.local
+npm install
+npm run dev
 ```
 
-Open: **http://localhost:5050**
+Open: **http://localhost:3000** (API on **http://localhost:8002**)
+
+### Docker Compose
+
+```batch
+start.bat
+```
+
+Open: **http://localhost:5050** (compose maps frontend :5050 → :3000, API :8001)
 
 ---
 
@@ -297,4 +309,15 @@ jarvis-ai-brain/
 - **Add a calendar agent**: `POST /context` with upcoming events from Google Calendar API
 - **Switch LLM**: change `OLLAMA_MODEL=codellama` for code-focused queries
 - **Upgrade TTS**: set `TTS_ENGINE=coqui` and install `TTS` package for neural voice
-- **Persistent chat history**: replace `_history` list in `routers/chat.py` with SQLite
+- **Persistent chat history**: SQLite in `services/chat_history.py` (already shipped)
+
+---
+
+## 5-minute demo script (parity overhaul)
+
+1. Open http://localhost:5050 — JARVIS HUD online
+2. Chat: `Remember the word ORBIT` → then `What word did I ask you to remember?` (multi-turn memory)
+3. Watch the reply **stream** token-by-token
+4. Click **+ NEW** in Threads, send a different message, switch back — sessions isolate
+5. Brief tab → Read aloud (existing)
+6. *(Later weeks)* Dashboard graph pulse → Sim light → HA light

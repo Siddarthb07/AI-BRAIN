@@ -9,11 +9,16 @@ export default function HUD() {
   const ingestGitHub = useJarvisStore((state) => state.ingestGitHub)
   const fetchExternal = useJarvisStore((state) => state.fetchExternal)
   const healthState = useJarvisStore((state) => state.healthState)
-  const vaultStatus = useJarvisStore((state) => state.vaultStatus)
-  const googleCalendar = useJarvisStore((state) => state.googleCalendar)
+  const shellMode = useJarvisStore((state) => state.shellMode)
   const setActivePanel = useJarvisStore((state) => state.setActivePanel)
+  const setShellMode = useJarvisStore((state) => state.setShellMode)
   const [username, setUsername] = useState('')
   const [showIngest, setShowIngest] = useState(false)
+
+  const goWorkPanel = (panel) => {
+    setShellMode('work')
+    setActivePanel(panel)
+  }
 
   const handleIngest = (event) => {
     event.preventDefault()
@@ -24,18 +29,9 @@ export default function HUD() {
     setUsername('')
   }
 
-  const voiceColors = {
-    idle: 'var(--green)',
-    recording: 'var(--red)',
-    processing: 'var(--gold)',
-    speaking: 'var(--cyan)',
-  }
-
-  const calendarColor = googleCalendar.connected
-    ? 'var(--green)'
-    : googleCalendar.configured
-      ? 'var(--gold)'
-      : 'var(--text-dim)'
+  const llmReady = Boolean(healthState?.ollama || healthState?.groq)
+  const primary = healthState?.llm?.primary
+  const linkOnline = llmReady || Boolean(healthState?.qdrant)
 
   return (
     <header
@@ -83,7 +79,7 @@ export default function HUD() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
         <div
           style={{
             fontFamily: 'var(--font-mono)',
@@ -99,54 +95,43 @@ export default function HUD() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-        {[
-          { label: 'OLLAMA', ok: healthState?.ollama },
-          { label: 'QDRANT', ok: healthState?.qdrant },
-          { label: 'VAULT', ok: Boolean(vaultStatus?.vault_path) },
-        ].map((item) => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <div
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: item.ok ? 'var(--green)' : 'var(--red)',
-              }}
-            />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)' }}>{item.label}</span>
-          </div>
-        ))}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <div
             style={{
-              width: '7px',
-              height: '7px',
+              width: 7,
+              height: 7,
               borderRadius: '50%',
-              background: voiceColors[voiceState] || 'var(--green)',
-              boxShadow: `0 0 6px ${voiceColors[voiceState] || 'var(--green)'}`,
-              animation: voiceState !== 'idle' ? 'blink 0.8s infinite' : 'none',
+              background: linkOnline ? 'var(--cyan)' : 'var(--text-dim)',
+              boxShadow: linkOnline ? '0 0 6px var(--cyan-dim)' : 'none',
             }}
           />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>
-            {voiceState.toUpperCase()}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.08em' }}>
+            {llmReady
+              ? `LLM ${String(primary || 'READY').toUpperCase()}`
+              : 'LLM OFF'}
+            {voiceState !== 'idle' ? ` · ${voiceState.toUpperCase()}` : ''}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <div
-            style={{
-              width: '7px',
-              height: '7px',
-              borderRadius: '50%',
-              background: calendarColor,
-              boxShadow: `0 0 6px ${calendarColor}`,
-            }}
-          />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>
-            {googleCalendar.connected ? 'CAL LIVE' : googleCalendar.configured ? 'CAL READY' : 'CAL OFF'}
-          </span>
+        <div style={{ display: 'flex', gap: '4px', fontFamily: 'var(--font-mono)', fontSize: '9px', letterSpacing: '0.1em' }}>
+          {['dashboard', 'work', 'lab'].map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setShellMode(mode)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 6px',
+                color: shellMode === mode ? 'var(--cyan)' : 'var(--text-dim)',
+                opacity: shellMode === mode ? 1 : 0.55,
+              }}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -154,7 +139,7 @@ export default function HUD() {
         <button className="btn" style={{ fontSize: '10px', padding: '6px 11px' }} onClick={() => setShowIngest((open) => !open)}>
           + GITHUB
         </button>
-        <button className="btn" style={{ fontSize: '10px', padding: '6px 11px' }} onClick={() => setActivePanel('calendar')}>
+        <button className="btn" style={{ fontSize: '10px', padding: '6px 11px' }} onClick={() => goWorkPanel('calendar')}>
           CAL
         </button>
         <button className="btn" style={{ fontSize: '10px', padding: '6px 11px' }} onClick={fetchExternal}>
@@ -192,7 +177,7 @@ export default function HUD() {
           <button className="btn" onClick={handleIngest}>
             INGEST
           </button>
-          <button className="btn btn-red" onClick={() => setShowIngest(false)}>
+          <button className="btn" onClick={() => setShowIngest(false)}>
             CLOSE
           </button>
         </div>
