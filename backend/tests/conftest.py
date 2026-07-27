@@ -31,7 +31,7 @@ def fast_llm(monkeypatch):
         yield text[:mid]
         yield text[mid:]
 
-    async def fake_assemble_context(message, include_context=True):
+    async def fake_assemble_context(message, include_context=True, focus_repo=None):
         return "", []
 
     import services.jarvis_orchestrator as jol

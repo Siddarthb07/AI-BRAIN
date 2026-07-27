@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
+import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
 import { API_BASE } from '../lib/api'
 
 const API = API_BASE
@@ -150,9 +150,9 @@ export default function VoicePanel() {
     const started = await playSpeech(text, {
       preferBrowser: !useBackend,
       preferBackend: useBackend,
-      backendMaxChars: 1000,
-      browserMaxChars: 1000,
-      browserChunkSize: 360,
+      backendMaxChars: DEFAULT_SPEECH_MAX_CHARS,
+      browserMaxChars: DEFAULT_SPEECH_MAX_CHARS,
+      browserChunkSize: DEFAULT_SPEECH_CHUNK_CHARS,
       lang: 'en-US',
       rate: 0.98,
       pitch: 1,

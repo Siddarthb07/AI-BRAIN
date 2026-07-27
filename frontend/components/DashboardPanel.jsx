@@ -187,6 +187,11 @@ export default function DashboardPanel() {
       : llm.ollama_model || '—'
   const vaultOk = Boolean(vaultStatus?.configured || vaultStatus?.vault_path || healthState.vault_configured)
   const activeProject = contextState?.active_project || brief?.active_project || 'unset'
+  const focusRepo = useJarvisStore((s) => s.focusRepo)
+  const chatFocus =
+    (selectedNode?.type === 'repo' && (selectedNode.label || selectedNode.data?.name)) ||
+    focusRepo ||
+    activeProject
   const repoSuggestions = (repos || []).slice(0, 8).map((r) => r.name).filter(Boolean)
 
   const saveFocus = async (name) => {
@@ -362,7 +367,7 @@ export default function DashboardPanel() {
 
         <SectionLabel>FOCUS</SectionLabel>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--amber)', marginBottom: '10px' }}>
-          {activeProject === 'unset' ? 'NO PROJECT SET' : activeProject}
+          {chatFocus === 'unset' ? 'NO PROJECT SET' : chatFocus}
         </div>
         <form
           onSubmit={(e) => {

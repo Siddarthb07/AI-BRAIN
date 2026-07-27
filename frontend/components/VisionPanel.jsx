@@ -19,6 +19,8 @@ export default function VisionPanel() {
   const fetchVaultStatus = useJarvisStore((s) => s.fetchVaultStatus)
   const lastSaveToast = useJarvisStore((s) => s.lastSaveToast)
   const setVisionCameraActive = useJarvisStore((s) => s.setVisionCameraActive)
+  const visionLastCapture = useJarvisStore((s) => s.visionLastCapture)
+  const runVoiceVisionCapture = useJarvisStore((s) => s.runVoiceVisionCapture)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -61,6 +63,26 @@ export default function VisionPanel() {
       fetchVaultNotes()
     }
   }, [tab, fetchVaultNotes, fetchVaultStatus])
+
+  // Sync voice-triggered captures into the Vision lab UI
+  useEffect(() => {
+    if (!visionLastCapture?.id) return
+    if (visionLastCapture.analysis) setAnalysis(visionLastCapture.analysis)
+    if (visionLastCapture.previewUrl) {
+      setPreview((prev) => {
+        if (prev && prev !== visionLastCapture.previewUrl) URL.revokeObjectURL(prev)
+        previewUrlRef.current = visionLastCapture.previewUrl
+        return visionLastCapture.previewUrl
+      })
+    }
+    setMeta({
+      provider: visionLastCapture.provider,
+      model: visionLastCapture.model,
+      error: visionLastCapture.error,
+    })
+    setOverlayNote(visionLastCapture.ok ? 'VOICE CAPTURE READY' : 'VOICE CAPTURE FAILED')
+    if (visionLastCapture.error && !visionLastCapture.ok) setError(visionLastCapture.error)
+  }, [visionLastCapture])
 
   const startCamera = async () => {
     setError('')
@@ -115,6 +137,24 @@ export default function VisionPanel() {
     setError('')
     setBusy(true)
     try {
+      // Prefer shared voice capture path (same camera + analyze pipeline)
+      const result = await runVoiceVisionCapture(prompt)
+      if (result?.ok && result.analysis) {
+        setAnalysis(result.analysis)
+        setMeta({ provider: result.provider, model: result.model, error: result.error })
+        if (result.previewUrl) {
+          setPreview((prev) => {
+            if (prev && prev !== result.previewUrl) URL.revokeObjectURL(prev)
+            previewUrlRef.current = result.previewUrl
+            return result.previewUrl
+          })
+        }
+        setOverlayNote(result.degraded ? 'CAPTURE OK — VISION DEGRADED' : 'CAPTURE READY')
+        if (result.degraded) setError(result.error || 'Vision degraded')
+        else setError('')
+        return
+      }
+
       let isLive = live
       if (!isLive) {
         isLive = await startCamera()
@@ -144,23 +184,23 @@ export default function VisionPanel() {
         return url
       })
       setOverlayNote('ANALYZING FRAME…')
-      const result = await analyzeVision(blob, prompt)
-      const provider = result?.provider
-      const degraded = provider === 'text_fallback' || Boolean(result?.error)
-      setMeta({ provider, model: result?.model, error: result?.error })
-      setAnalysis(result?.analysis || '')
+      const analyzed = await analyzeVision(blob, prompt)
+      const provider = analyzed?.provider
+      const degraded = provider === 'text_fallback' || Boolean(analyzed?.error)
+      setMeta({ provider, model: analyzed?.model, error: analyzed?.error })
+      setAnalysis(analyzed?.analysis || '')
       if (degraded) {
         setError(
-          result?.error
-            ? `Capture OK — vision unavailable (${result.error})`
+          analyzed?.error
+            ? `Capture OK — vision unavailable (${analyzed.error})`
             : 'Capture OK — vision unavailable (text fallback)',
         )
         setOverlayNote('CAPTURE OK — VISION DEGRADED')
-      } else if (result?.analysis) {
+      } else if (analyzed?.analysis) {
         setError('')
         setOverlayNote('CAPTURE READY')
       } else {
-        setError(result?.error || 'No analysis returned')
+        setError(analyzed?.error || 'No analysis returned')
         setOverlayNote('NO ANALYSIS')
       }
     } catch (e) {

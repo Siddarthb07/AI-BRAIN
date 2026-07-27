@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, speakText as playSpeech } from '../lib/speech'
+import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech } from '../lib/speech'
 import { formatIstTime } from '../lib/time'
 
 const QUICK_PROMPTS = [
@@ -359,9 +359,9 @@ export default function ChatPanel() {
     const started = await playSpeech(text, {
       preferBrowser: true,
       preferBackend: true,
-      backendMaxChars: 1000,
-      browserMaxChars: 1000,
-      browserChunkSize: 360,
+      backendMaxChars: DEFAULT_SPEECH_MAX_CHARS,
+      browserMaxChars: DEFAULT_SPEECH_MAX_CHARS,
+      browserChunkSize: DEFAULT_SPEECH_CHUNK_CHARS,
       lang: 'en-US',
       rate: 0.98,
       pitch: 1,

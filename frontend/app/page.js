@@ -17,6 +17,7 @@ import HousePanel from '../components/HousePanel'
 import VisionPanel from '../components/VisionPanel'
 import WakePanel, { WakeRuntime } from '../components/WakePanel'
 import GestureRuntime from '../components/GestureRuntime'
+import VisionCaptureRuntime from '../components/VisionCaptureRuntime'
 
 const BrainGraph = lazy(() => import('../components/BrainGraph'))
 
@@ -322,6 +323,7 @@ export default function Page() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)', overflow: 'hidden' }}>
       <WakeRuntime />
       <GestureRuntime />
+      <VisionCaptureRuntime />
       <HUD />
       {healthState.demo_mode ? (
         <div

@@ -22,6 +22,7 @@ Rules:
 - Prefer concrete next actions over fluff.
 - Timezone: Asia/Kolkata (IST). Always use the Current datetime from context for "today", "now", "this week", scheduling, and relative times. Do not invent a different date.
 - When PROJECT cards appear in context, treat them as authoritative for that repo (language, description, patterns, README). Do not invent "unknown language" or "unclear goals" when those fields are present. If still thin, say what is missing and propose a concrete ingest/next step.
+- If a Selected/focus repo is listed, that repo is the subject of this turn — prefer it over the durable Active project when they differ. Questions like "this project", "it", "the repo", or generic improvement advice refer to the selected repo.
 
 When helpful, end with a JSON block on its own line:
 ACTIONS: [{"type":"save_note|sync_vault|search_vault|write_brief|house_service|open_in_explorer","label":"...","params":{}}]
@@ -154,26 +155,56 @@ def _project_card(repo: dict) -> str:
     return "\n".join(lines)
 
 
-async def assemble_context(message: str, include_context: bool = True) -> tuple[str, list[dict]]:
+async def assemble_context(
+    message: str,
+    include_context: bool = True,
+    focus_repo: str | None = None,
+) -> tuple[str, list[dict]]:
     if not include_context:
         return "", []
 
     ctx = store.get_context()
     repos = store.get_repos()
     mentioned = _resolve_mentioned_repos(message, repos)
-    # If user asks about "my project" and active_project is set, include it
+
+    # Explicit UI selection / focus_repo wins over name matching and durable active_project
+    focus_name = str(focus_repo or "").strip()
+    if focus_name:
+        for repo in repos:
+            if str(repo.get("name") or "").lower() == focus_name.lower():
+                mentioned = [repo] + [r for r in mentioned if r.get("name") != repo.get("name")]
+                break
+        else:
+            # Repo not in store yet — still inject a minimal card from the name
+            mentioned = [{"name": focus_name, "description": "(selected in UI; limited indexed metadata)"}] + mentioned
+
+    # If user asks about "my project" / nothing named, include durable active_project too
     active = str(ctx.get("active_project") or "").strip()
     if active and active.lower() not in {"unset", "unknown", "none"}:
         for repo in repos:
-            if str(repo.get("name") or "").lower() == active.lower() and repo not in mentioned:
+            if str(repo.get("name") or "").lower() == active.lower() and all(
+                str(r.get("name") or "").lower() != active.lower() for r in mentioned
+            ):
                 mentioned.append(repo)
                 break
+
+    # If still nothing mentioned but there is a focus/active, force it so chat isn't generic
+    if not mentioned:
+        fallback = focus_name or (active if active.lower() not in {"unset", "unknown", "none", ""} else "")
+        if fallback:
+            for repo in repos:
+                if str(repo.get("name") or "").lower() == fallback.lower():
+                    mentioned = [repo]
+                    break
 
     project_parts: list[str] = []
     project_results: list[dict] = []
     for repo in mentioned:
         name = repo.get("name") or ""
-        project_parts.append(_project_card(repo))
+        card = _project_card(repo)
+        if focus_name and name.lower() == focus_name.lower():
+            card = f"SELECTED REPO (primary for this turn): {name}\n{card}"
+        project_parts.append(card)
         # Pull full meta/structure/code from local knowledge for this repo
         docs = rag.docs_for_repo(name, types=["repo_meta", "repo_structure", "code_file"], limit=6)
         # If store card already has readme, skip duplicate meta text
@@ -183,7 +214,7 @@ async def assemble_context(message: str, include_context: bool = True) -> tuple[
                 continue
             project_results.append(doc)
 
-    # Focused RAG: if a project was named, search within it; else global
+    # Focused RAG: if a project was named/selected, search within it; else global
     if mentioned:
         focused = []
         for repo in mentioned:
@@ -234,9 +265,11 @@ async def assemble_context(message: str, include_context: bool = True) -> tuple[
         print(f"[JOL] House context failed: {exc}")
 
     vault_st = vault.vault_status()
+    focus_line = focus_name or active or "unset"
     parts = [
         f"Current datetime: {format_ist_brief_label()}",
         f"Developer context: Active project={ctx.get('active_project', 'unknown')}, "
+        f"Selected/focus repo={focus_line}, "
         f"Goals={', '.join(ctx.get('daily_goals', []))}",
         f"Indexed repos:\n{repo_catalog}",
         f"Vault: {vault_st.get('vault_path')} ({vault_st.get('note_count', 0)} notes)",
@@ -306,9 +339,10 @@ async def run_chat(
     *,
     session_id: str | None = None,
     include_context: bool = True,
+    focus_repo: str | None = None,
 ) -> dict[str, Any]:
     sid = chat_history.ensure_session(session_id)
-    context_str, citations = await assemble_context(message, include_context)
+    context_str, citations = await assemble_context(message, include_context, focus_repo=focus_repo)
     history = _history_for_llm(sid)
 
     try:
@@ -351,11 +385,12 @@ async def run_chat_stream(
     *,
     session_id: str | None = None,
     include_context: bool = True,
+    focus_repo: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     sid = chat_history.ensure_session(session_id)
     yield {"type": "session", "session_id": sid}
 
-    context_str, citations = await assemble_context(message, include_context)
+    context_str, citations = await assemble_context(message, include_context, focus_repo=focus_repo)
     history = _history_for_llm(sid)
 
     chunks: list[str] = []

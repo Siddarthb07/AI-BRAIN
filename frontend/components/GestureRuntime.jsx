@@ -9,7 +9,7 @@
 import { useEffect, useRef } from 'react'
 import { useJarvisStore } from '../app/store'
 import { API_BASE } from '../lib/api'
-import { requestGestureCamera } from '../lib/gestures'
+import { requestGestureCamera, streamHasLiveVideo } from '../lib/gestures'
 import {
   CUSTOM_CONTROL_GESTURES,
   GESTURE_MODEL_URLS,
@@ -652,7 +652,6 @@ export default function GestureRuntime() {
   const visionCameraActive = useJarvisStore((s) => s.visionCameraActive)
   const gestureLatest = useJarvisStore((s) => s.gestureLatest)
   const setGestureLatest = useJarvisStore((s) => s.setGestureLatest)
-  const setGestureControlEnabled = useJarvisStore((s) => s.setGestureControlEnabled)
   const setGestureBootStream = useJarvisStore((s) => s.setGestureBootStream)
   const setGesturePreviewVisible = useJarvisStore((s) => s.setGesturePreviewVisible)
   const setStatusMsg = useJarvisStore((s) => s.setStatusMsg)
@@ -662,6 +661,7 @@ export default function GestureRuntime() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const ownsStreamRef = useRef(false) // only stop tracks we opened ourselves
   const landmarkerRef = useRef(null) // holds GestureRecognizer instance
   const rafRef = useRef(0)
   const lastTsRef = useRef(0)
@@ -696,9 +696,11 @@ export default function GestureRuntime() {
       landmarkerRef.current = null
       if (videoRef.current) videoRef.current.srcObject = null
       if (!enabled) {
-        streamRef.current?.getTracks?.().forEach((t) => t.stop())
+        if (ownsStreamRef.current) {
+          streamRef.current?.getTracks?.().forEach((t) => t.stop())
+        }
         streamRef.current = null
-        setGestureBootStream(null)
+        ownsStreamRef.current = false
         setGestureSession?.({ running: false, pid: null, source: null })
         setGestureLatest({
           active: false,
@@ -713,8 +715,7 @@ export default function GestureRuntime() {
           ts: Date.now() / 1000,
         })
       } else if (visionCameraActive) {
-        streamRef.current?.getTracks?.().forEach((t) => t.stop())
-        streamRef.current = null
+        if (videoRef.current) videoRef.current.srcObject = null
         setGestureLatest({
           active: false,
           gesture: 'none',
@@ -728,27 +729,54 @@ export default function GestureRuntime() {
     }
 
     let cancelled = false
-    const video = videoRef.current
-    if (!video) return undefined
 
     const boot = async () => {
       try {
+        // Wait for hidden <video> to mount (Strict Mode / first paint)
+        let video = videoRef.current
+        for (let i = 0; i < 20 && !video; i++) {
+          await new Promise((r) => setTimeout(r, 50))
+          if (cancelled) return
+          video = videoRef.current
+        }
+        if (!video) {
+          setStatusMsg('GESTURE FAILED — video element missing')
+          return
+        }
+
         setStatusMsg('GESTURES — STARTING CAMERA…')
         let stream = useJarvisStore.getState().gestureBootStream
-        const live = stream?.getVideoTracks?.().some((t) => t.readyState === 'live')
-        if (!live) {
+        let createdHere = false
+        if (!streamHasLiveVideo(stream)) {
           stream = await requestGestureCamera()
+          createdHere = true
           setGestureBootStream(stream)
         }
         if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop())
+          // Never kill the click-granted boot stream on Strict Mode remount
+          if (createdHere) stream.getTracks().forEach((t) => t.stop())
           return
         }
+        ownsStreamRef.current = createdHere
         streamRef.current = stream
         video.srcObject = stream
         video.muted = true
         video.playsInline = true
-        await video.play()
+        try {
+          await video.play()
+        } catch (playErr) {
+          console.warn('[GestureRuntime] video.play', playErr)
+          // Retry once with a fresh stream from this path
+          if (!cancelled) {
+            stream = await requestGestureCamera()
+            createdHere = true
+            ownsStreamRef.current = true
+            streamRef.current = stream
+            setGestureBootStream(stream)
+            video.srcObject = stream
+            await video.play()
+          }
+        }
 
         await new Promise((resolve) => {
           if (video.readyState >= 2 && video.videoWidth > 0) {
@@ -760,8 +788,9 @@ export default function GestureRuntime() {
             resolve()
           }
           video.addEventListener('loadeddata', onReady)
-          setTimeout(resolve, 2000)
+          setTimeout(resolve, 2500)
         })
+        if (cancelled) return
 
         setStatusMsg('GESTURES — LOADING MEDIAPIPE LIST…')
         const fileset = await loadFileset()
@@ -773,7 +802,7 @@ export default function GestureRuntime() {
         landmarkerRef.current = recognizer
         setGestureSession?.({ running: true, pid: null, source: 'browser' })
         setGesturePreviewVisible(true)
-        setStatusMsg('GESTURES ON — MEDIAPIPE + PINCH')
+        setStatusMsg('GESTURES ON — CAMERA LIVE')
 
         const tick = () => {
           if (cancelled || !landmarkerRef.current) return
@@ -902,8 +931,7 @@ export default function GestureRuntime() {
       } catch (e) {
         console.error('[GestureRuntime]', e)
         setStatusMsg(`GESTURE FAILED — ${String(e?.message || e).slice(0, 50)}`)
-        setGestureControlEnabled(false)
-        setGestureBootStream(null)
+        // Keep gestureControlEnabled — user can retry; only clear if camera hard-failed
         setGestureSession?.({ running: false, pid: null, source: null })
         setGestureLatest({
           active: false,
@@ -922,13 +950,13 @@ export default function GestureRuntime() {
       cancelAnimationFrame(rafRef.current)
       landmarkerRef.current?.close?.()
       landmarkerRef.current = null
+      // Do NOT stop MediaStream here — Strict Mode remount would kill the click-granted camera
     }
   }, [
     runGestures,
     enabled,
     visionCameraActive,
     setGestureLatest,
-    setGestureControlEnabled,
     setGestureBootStream,
     setGesturePreviewVisible,
     setStatusMsg,

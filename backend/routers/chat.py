@@ -14,6 +14,7 @@ class ChatMessage(BaseModel):
     message: str
     include_context: bool = True
     session_id: Optional[str] = None
+    focus_repo: Optional[str] = None
 
 
 class SaveChatRequest(BaseModel):
@@ -43,6 +44,7 @@ async def chat_stream(payload: ChatMessage):
             payload.message,
             session_id=payload.session_id,
             include_context=payload.include_context,
+            focus_repo=payload.focus_repo,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
@@ -50,7 +52,11 @@ async def chat_stream(payload: ChatMessage):
 
 
 @router.get("/stream")
-async def chat_stream_get(message: str, session_id: Optional[str] = None):
+async def chat_stream_get(
+    message: str,
+    session_id: Optional[str] = None,
+    focus_repo: Optional[str] = None,
+):
     """GET SSE for simple clients — prefer POST /chat/stream."""
     if not message.strip():
         raise HTTPException(400, "Message is empty")
@@ -60,6 +66,7 @@ async def chat_stream_get(message: str, session_id: Optional[str] = None):
             message,
             session_id=session_id,
             include_context=True,
+            focus_repo=focus_repo,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
@@ -74,6 +81,7 @@ async def chat(payload: ChatMessage):
         payload.message,
         session_id=payload.session_id,
         include_context=payload.include_context,
+        focus_repo=payload.focus_repo,
     )
 
 

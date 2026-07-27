@@ -46,6 +46,7 @@ export const useJarvisStore = create((set, get) => ({
   vaultNotes: [],
   vaultStatus: null,
   selectedNode: null,
+  focusRepo: null,
   isLoading: false,
   voiceState: 'idle',
   wakeEnabled: false,
@@ -57,6 +58,8 @@ export const useJarvisStore = create((set, get) => ({
   gestureLatest: null,
   gestureSession: { running: false, pid: null },
   visionCameraActive: false,
+  visionCaptureRequest: null,
+  visionLastCapture: null,
   graphSpinEnabled: true,
   statusMsg: 'JARVIS ONLINE',
   activePanel: 'chat',
@@ -86,7 +89,30 @@ export const useJarvisStore = create((set, get) => ({
 
   setRepos: (repos) => set({ repos }),
   setBrief: (brief) => set({ brief }),
-  setSelectedNode: (node) => set({ selectedNode: node }),
+  setSelectedNode: (node) => {
+    const name =
+      node?.type === 'repo'
+        ? String(node.label || node.data?.name || '').trim()
+        : ''
+    set((state) => ({
+      selectedNode: node,
+      focusRepo: name || state.focusRepo,
+      ...(name
+        ? {
+            contextState: {
+              ...state.contextState,
+              active_project: name,
+            },
+            statusMsg: `FOCUS · ${name}`,
+          }
+        : {}),
+    }))
+    // Persist focus so briefs / later chats match the graph selection
+    if (name) {
+      void get().setActiveProject(name)
+    }
+  },
+  setFocusRepo: (focusRepo) => set({ focusRepo }),
   setVoiceState: (voiceState) => set({ voiceState }),
   setWakeEnabled: (wakeEnabled) => set({ wakeEnabled }),
   setWakeStatus: (wakeStatus) => set({ wakeStatus }),
@@ -98,6 +124,45 @@ export const useJarvisStore = create((set, get) => ({
   setGestureLatest: (gestureLatest) => set({ gestureLatest }),
   setGestureSession: (gestureSession) => set({ gestureSession }),
   setGraphSpinEnabled: (graphSpinEnabled) => set({ graphSpinEnabled }),
+
+  /** Voice / UI: open camera, snap a frame, analyze. Resolves when runtime finishes. */
+  runVoiceVisionCapture: async (prompt = '') => {
+    const id = `vis-${Date.now()}`
+    set({
+      visionCaptureRequest: {
+        id,
+        prompt:
+          String(prompt || '').trim() ||
+          'Describe clearly what is visible in this camera frame. Be concrete and brief.',
+        at: Date.now(),
+      },
+      visionLastCapture: null,
+      shellMode: 'lab',
+      activePanel: 'vision',
+      statusMsg: 'VISION — OPENING CAMERA…',
+    })
+
+    const started = Date.now()
+    while (Date.now() - started < 45000) {
+      await new Promise((r) => setTimeout(r, 200))
+      const last = get().visionLastCapture
+      if (last?.id === id) return last
+    }
+    return {
+      id,
+      ok: false,
+      analysis: '',
+      error: 'Vision capture timed out — allow camera access and try again.',
+      degraded: true,
+    }
+  },
+
+  finishVisionCapture: (result) => {
+    set({
+      visionLastCapture: result,
+      visionCaptureRequest: null,
+    })
+  },
 
   /** Must run from a click handler so the browser shows the camera prompt. */
   enableGestures: async () => {
@@ -132,6 +197,7 @@ export const useJarvisStore = create((set, get) => ({
     set({
       gestureControlEnabled: false,
       gestureBootStream: null,
+      gesturePreviewVisible: false,
       gestureSession: { running: false, pid: null, source: null },
       statusMsg: 'GESTURES OFF',
     })
@@ -234,6 +300,7 @@ export const useJarvisStore = create((set, get) => ({
           focus_time: ctx.focus_time || '',
           energy_level: ctx.energy_level || '',
         },
+        focusRepo: project,
         statusMsg: `FOCUS → ${project.toUpperCase()}`,
       })
       await get().fetchBrief()
@@ -616,16 +683,32 @@ export const useJarvisStore = create((set, get) => ({
   },
 
   sendChat: async (message) => {
-    const { chatHistory, sessionId } = get()
+    const { chatHistory, sessionId, focusRepo, selectedNode, contextState } = get()
+    const selectedName =
+      selectedNode?.type === 'repo'
+        ? String(selectedNode.label || selectedNode.data?.name || '').trim()
+        : ''
+    const focus =
+      selectedName ||
+      focusRepo ||
+      (contextState?.active_project && contextState.active_project !== 'unset'
+        ? contextState.active_project
+        : null)
+
     set({
       chatHistory: [...chatHistory, { role: 'user', content: message, ts: Date.now() }],
-      statusMsg: 'THINKING...',
+      statusMsg: focus ? `THINKING · ${focus}…` : 'THINKING...',
     })
     try {
       const res = await fetch(`${API}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, include_context: true, session_id: sessionId }),
+        body: JSON.stringify({
+          message,
+          include_context: true,
+          session_id: sessionId,
+          focus_repo: focus || undefined,
+        }),
       })
       if (!res.ok || !res.body) {
         throw new Error('stream failed')

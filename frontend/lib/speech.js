@@ -146,10 +146,17 @@ function pickVoiceCached(voices = [], voiceMatchers = []) {
   return voice
 }
 
-/** Speakable clip — keeps more of the reply; trims ACTIONS JSON tail. */
-export function clipForSpeech(text = '', maxChars = 900) {
+/** Speakable clip — keeps more of the reply; trims ACTIONS JSON + markdown noise. */
+export const DEFAULT_SPEECH_MAX_CHARS = 4500
+export const DEFAULT_SPEECH_CHUNK_CHARS = 620
+
+export function clipForSpeech(text = '', maxChars = DEFAULT_SPEECH_MAX_CHARS) {
   let cleaned = String(text)
     .replace(/\n?ACTIONS:\s*\[[\s\S]*$/i, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[#>*_~]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (!cleaned) return ''
@@ -163,10 +170,10 @@ export function clipForSpeech(text = '', maxChars = 900) {
       if ((acc + s).length > maxChars) break
       acc += s
     }
-    if (acc.length > 80) return acc.trim()
+    if (acc.length > 120) return acc.trim()
   }
   const space = cut.lastIndexOf(' ')
-  return `${(space > 120 ? cut.slice(0, space) : cut).trim()}…`
+  return `${(space > 160 ? cut.slice(0, space) : cut).trim()}…`
 }
 
 function scoreVoice(voice) {
@@ -265,13 +272,21 @@ async function speakInBrowser(text, options = {}, token = speechToken) {
   const voices = await waitForVoices()
   if (token !== speechToken) return false
   const preferred = pickVoiceCached(voices, options.voiceMatchers || AMERICAN_VOICE_MATCHERS)
-  const hardCap = options.browserMaxChars ?? 900
-  const maxChunk = options.browserChunkSize ?? 320
+  const hardCap = options.browserMaxChars ?? DEFAULT_SPEECH_MAX_CHARS
+  const maxChunk = options.browserChunkSize ?? DEFAULT_SPEECH_CHUNK_CHARS
   const clipped = text.length > hardCap ? text.slice(0, hardCap) : text
   const chunks = splitIntoChunks(clipped, maxChunk)
   if (chunks.length === 0) return false
 
-  const speakOne = (chunk) =>
+  // Chrome often silently pauses long TTS — nudge resume while this session is live
+  const keepAlive = setInterval(() => {
+    if (token !== speechToken) return
+    try {
+      window.speechSynthesis.resume()
+    } catch {}
+  }, 3500)
+
+  const speakOne = (chunk, attempt = 0) =>
     new Promise((resolve) => {
       if (token !== speechToken) {
         resolve(false)
@@ -283,22 +298,60 @@ async function speakInBrowser(text, options = {}, token = speechToken) {
       utterance.pitch = options.pitch ?? 1
       utterance.volume = options.volume ?? 1
       if (preferred) utterance.voice = preferred
-      utterance.onend = () => resolve(true)
-      utterance.onerror = () => resolve(false)
+
+      let settled = false
+      const finish = (ok) => {
+        if (settled) return
+        settled = true
+        resolve(ok)
+      }
+
+      utterance.onend = () => finish(true)
+      utterance.onerror = (event) => {
+        const err = event?.error || ''
+        // Chrome flakiness between chunks — retry once
+        if (token === speechToken && attempt < 1 && (err === 'canceled' || err === 'interrupted' || err === 'network')) {
+          try {
+            window.speechSynthesis.cancel()
+            window.speechSynthesis.resume()
+          } catch {}
+          setTimeout(() => {
+            speakOne(chunk, attempt + 1).then(finish)
+          }, 120)
+          return
+        }
+        // User barge-in / new speak session
+        if (err === 'interrupted' || err === 'canceled') {
+          finish(token === speechToken)
+          return
+        }
+        finish(false)
+      }
+
       try {
         window.speechSynthesis.resume()
       } catch {}
       window.speechSynthesis.speak(utterance)
     })
 
-  // Queue every chunk — never truncate joined text to one chunk length
-  for (let i = 0; i < chunks.length; i++) {
-    if (token !== speechToken) return false
-    const ok = await speakOne(chunks[i])
-    if (!ok) return false
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      if (token !== speechToken) return false
+      const ok = await speakOne(chunks[i])
+      if (!ok) return false
+      // Tiny gap + resume helps Chrome not drop the next utterance
+      if (i < chunks.length - 1 && token === speechToken) {
+        try {
+          window.speechSynthesis.resume()
+        } catch {}
+        await new Promise((r) => setTimeout(r, 40))
+      }
+    }
+    if (token === speechToken) options.onEnd?.()
+    return true
+  } finally {
+    clearInterval(keepAlive)
   }
-  if (token === speechToken) options.onEnd?.()
-  return true
 }
 
 export function stopSpeechPlayback() {
@@ -319,7 +372,7 @@ async function speakWithBackend(text, options = {}, token = speechToken) {
     const res = await fetch(`${API}/voice/output`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text.slice(0, options.backendMaxChars ?? 500) }),
+      body: JSON.stringify({ text: text.slice(0, options.backendMaxChars ?? DEFAULT_SPEECH_MAX_CHARS) }),
       signal: controller.signal,
     })
 

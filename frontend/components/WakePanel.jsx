@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, clipForSpeech, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
+import { AMERICAN_VOICE_MATCHERS, clipForSpeech, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
 import { API_BASE } from '../lib/api'
 
 const WAKE_RE = /\bjarvis\b/i
@@ -10,13 +10,31 @@ const KEEP_RE =
   /\b(keep listening|stay listening|always listen(?:ing)?|continuous listen(?:ing)?)\b/i
 const STOP_RE =
   /\b(stop listening|go to sleep|jarvis sleep|goodbye jarvis|cancel listening|stop always listen(?:ing)?)\b/i
+const CAPTURE_RE =
+  /\b(capture what i(?:'?m| am) seeing(?: now)?|what(?:'?s| is) (?:on|in) (?:my |the )?(?:camera|screen|desk|view)|what am i (?:looking at|seeing)(?: now)?|look at (?:this|my desk|the (?:room|camera|view))|take a (?:photo|picture|snapshot|capture)|analyze (?:this|the|my) (?:view|frame|camera|scene)|vision capture|open (?:the )?camera|use (?:the )?camera)\b/i
 
 const INTERRUPT_RE = /\b(jarvis\s+)?(stop talking|be quiet|shut up|enough|cancel reply)\b/i
-const SPEECH_MAX_CHARS = 1000
-const SPEECH_CHUNK = 360
+const SPEECH_MAX_CHARS = DEFAULT_SPEECH_MAX_CHARS
+const SPEECH_CHUNK = DEFAULT_SPEECH_CHUNK_CHARS
+
+function extractCapturePrompt(text = '') {
+  const cleaned = stripWake(text).replace(CAPTURE_RE, ' ').replace(/\s+/g, ' ').trim()
+  if (cleaned && cleaned.length > 3 && !/^(now|please|for me)$/i.test(cleaned)) return cleaned
+  return 'Describe clearly what is visible in this camera frame. Be concrete and brief.'
+}
 
 function stripWake(text = '') {
   return text.replace(WAKE_RE, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function isBargeIn(text, { keepListening, lastSpoken }) {
+  if (!text || looksLikeEcho(text, lastSpoken)) return false
+  if (INTERRUPT_RE.test(text)) return true
+  if (WAKE_RE.test(text)) return true
+  const words = text.trim().split(/\s+/).filter(Boolean)
+  if (keepListening && words.length >= 3) return true
+  if (words.length >= 5) return true
+  return false
 }
 
 function normalize(text = '') {
@@ -56,6 +74,7 @@ export function WakeRuntime() {
   const setVoiceState = useJarvisStore((s) => s.setVoiceState)
   const sendChat = useJarvisStore((s) => s.sendChat)
   const setStatusMsg = useJarvisStore((s) => s.setStatusMsg)
+  const runVoiceVisionCapture = useJarvisStore((s) => s.runVoiceVisionCapture)
 
   const ARM_TTL_MS = 12000
 
@@ -140,8 +159,8 @@ export function WakeRuntime() {
         setWakeStatus('speaking')
         setVoiceState('speaking')
         setStatusMsg(`SPEAKING · ${spoken.slice(0, 56)}${spoken.length > 56 ? '…' : ''}`)
-        // Mute STT for the whole reply so speaker bleed doesn't cut TTS off
-        armMute(Math.min(45000, 2500 + spoken.length * 55))
+        // Short anti-echo only — long mute blocked barge-in
+        armMute(350)
       }
       lastSpokenRef.current = spoken
       try {
@@ -158,7 +177,7 @@ export function WakeRuntime() {
         if (!ok) setStatusMsg('SPEECH FAILED — check browser voice')
       } finally {
         speakingRef.current = false
-        armMute(keepRef.current ? 1100 : 550)
+        armMute(keepRef.current ? 650 : 400)
         setVoiceState('idle')
         setWakeStatus(keepRef.current || isArmed() ? 'listening_command' : 'listening_wake')
       }
@@ -176,20 +195,35 @@ export function WakeRuntime() {
       if (norm && norm === lastHeardRef.current.text && now - lastHeardRef.current.at < 1200) return
       lastHeardRef.current = { text: norm, at: now }
 
-      // While JARVIS speaks: ignore mic (stops self-cutoff). Only explicit interrupt cuts TTS.
+      // Barge-in: cut TTS and continue to handle as a new command
       if (speakingRef.current) {
-        if (INTERRUPT_RE.test(text) && !looksLikeEcho(text, lastSpokenRef.current)) {
-          stopSpeechPlayback()
-          speakingRef.current = false
-          muteUntilRef.current = 0
-          setVoiceState('idle')
-          setWakeStatus(keepRef.current || isArmed() ? 'listening_command' : 'listening_wake')
+        if (
+          !isBargeIn(text, {
+            keepListening: keepRef.current,
+            lastSpoken: lastSpokenRef.current,
+          })
+        ) {
+          return
         }
-        return
+        stopSpeechPlayback()
+        speakingRef.current = false
+        muteUntilRef.current = 0
+        setVoiceState('idle')
+        // fall through — process this utterance
+      } else if (Date.now() < muteUntilRef.current) {
+        // Grace window after TTS — still allow clear barge-style commands
+        if (
+          !isBargeIn(text, {
+            keepListening: keepRef.current,
+            lastSpoken: lastSpokenRef.current,
+          })
+        ) {
+          return
+        }
+        muteUntilRef.current = 0
       }
 
       if (processingRef.current) return
-      if (Date.now() < muteUntilRef.current) return
       if (looksLikeEcho(text, lastSpokenRef.current)) return
 
       const hasWake = WAKE_RE.test(text)
@@ -237,6 +271,42 @@ export function WakeRuntime() {
         return
       }
 
+      // Vision capture — open camera + analyze (before generic chat)
+      const captureSource = hasWake ? stripWake(text) : text
+      if (CAPTURE_RE.test(captureSource) || CAPTURE_RE.test(text)) {
+        processingRef.current = true
+        setWakeStatus('processing')
+        setVoiceState('processing')
+        setStatusMsg('VISION — OPENING CAMERA…')
+        try {
+          await speak('One moment — opening the camera.')
+          const result = await runVoiceVisionCapture(extractCapturePrompt(text))
+          if (result?.ok && result.analysis) {
+            await speak(result.analysis)
+          } else {
+            await speak(
+              result?.error
+                ? `I could not capture that. ${result.error}. Try enabling Gestures or Vision once to grant camera access, then ask again.`
+                : 'I could not capture the camera frame. Grant camera access and try again.',
+            )
+          }
+        } catch {
+          await speak('Camera capture failed. Grant camera permission and try again.')
+        } finally {
+          processingRef.current = false
+          if (keepRef.current) {
+            armedRef.current = true
+            armUntilRef.current = 0
+            setWakeStatus('listening_command')
+            setStatusMsg('ALWAYS LISTENING — ASK ANYTHING')
+          } else {
+            setWakeStatus(isArmed() ? 'listening_command' : 'listening_wake')
+          }
+          setVoiceState('idle')
+        }
+        return
+      }
+
       const remainder = stripWake(text)
 
       if (hasWake && !remainder) {
@@ -279,7 +349,7 @@ export function WakeRuntime() {
         setVoiceState('idle')
       }
     },
-    [sendChat, setKeepListening, setStatusMsg, setVoiceState, setWakeStatus, speak],
+    [sendChat, runVoiceVisionCapture, setKeepListening, setStatusMsg, setVoiceState, setWakeStatus, speak],
   )
 
   handleUtteranceRef.current = handleUtterance
@@ -341,11 +411,25 @@ export function WakeRuntime() {
       rec.onresult = (event) => {
         if (cancelled) return
         let finalText = ''
+        let interimText = ''
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const piece = event.results[i][0]?.transcript || ''
           if (event.results[i].isFinal) finalText += piece
+          else interimText += piece
         }
-        // No interim barge-in — speaker bleed was cutting TTS mid-sentence
+        // Soft barge-in on interim: stop TTS early, wait for final to answer
+        if (
+          speakingRef.current &&
+          isBargeIn(interimText, {
+            keepListening: keepRef.current,
+            lastSpoken: lastSpokenRef.current,
+          })
+        ) {
+          stopSpeechPlayback()
+          speakingRef.current = false
+          muteUntilRef.current = 0
+          setVoiceState('idle')
+        }
         if (finalText.trim()) handleUtteranceRef.current?.(finalText.trim())
       }
 
@@ -448,8 +532,9 @@ export default function WakePanel() {
 
       <div style={{ fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
         Say <strong style={{ color: 'var(--cyan)' }}>Jarvis</strong> to arm for ~12s. Say{' '}
-        <strong style={{ color: 'var(--amber)' }}>Jarvis always listening</strong> (or keep listening) for continuous
-        Q&amp;A. Talk over him to interrupt. Say stop listening to sleep.
+        <strong style={{ color: 'var(--amber)' }}>Jarvis always listening</strong> for continuous Q&amp;A. Say{' '}
+        <strong style={{ color: 'var(--cyan)' }}>capture what I&apos;m seeing</strong> to open the camera and describe
+        the frame. Talk over him to interrupt.
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
