@@ -15,11 +15,13 @@ const NODE_MID = '#4a90d9'
 const NODE_DARK = '#1e50a2'
 const NODE_NEWS = '#c084fc'
 const NODE_GOLD = '#f0b429'
+const NODE_DEMO = '#34d399'
 const MESH = '#6a8aaa'
 const MESH_DIM = '#1a3a5c'
 const LINE_OUTER = '#0d2a4a'
 const MESH_NEWS = '#5a3a78'
 const MESH_GOLD = '#5a4820'
+const MESH_DEMO = '#1a4a3a'
 const INK = '#02060c'
 
 /** Concentric shells on one sphere — scaled to fit between side rails */
@@ -28,6 +30,7 @@ const R_MID = 2.45
 const R_OUTER = 3.15
 const R_NEWS = 3.8
 const R_UPDATES = 4.4
+const R_DEMOS = 5.0
 
 const FALLBACK = [
   'AI-BRAIN', 'Lexprobe', 'NeuralVortex', 'Health-AI', 'GeoQuant',
@@ -107,13 +110,15 @@ function Core() {
   )
 }
 
-function Dot({ position, size, color, label, showLabel, labelColor, onSelect, selected }) {
+function Dot({ position, size, color, label, showLabel, labelColor, onSelect, selected, pulsing }) {
   const [hovered, setHovered] = useState(false)
   const active = selected || hovered
   const mesh = useRef()
 
-  useFrame(() => {
-    if (mesh.current) mesh.current.scale.setScalar(active ? 1.35 : 1)
+  useFrame(({ clock }) => {
+    if (!mesh.current) return
+    const pulse = pulsing ? 1 + Math.sin(clock.elapsedTime * 6) * 0.28 : 1
+    mesh.current.scale.setScalar((active ? 1.35 : 1) * pulse)
   })
 
   return (
@@ -138,7 +143,7 @@ function Dot({ position, size, color, label, showLabel, labelColor, onSelect, se
         <meshStandardMaterial
           color={active ? CORE_WHITE : color}
           emissive={color}
-          emissiveIntensity={active ? 0.7 : 0.35}
+          emissiveIntensity={pulsing ? 1.1 : active ? 0.7 : 0.35}
           roughness={0.4}
           metalness={0.25}
         />
@@ -271,8 +276,27 @@ function buildNodes(graphProjection, repos, hnStories) {
     position: fibSphere(i, Math.max(updateCapped.length, 1), R_UPDATES),
   }))
 
+  const demoNodes = (graphProjection?.nodes || [])
+    .filter((n) => n.type === 'demo')
+    .slice(0, 10)
+    .map((n, i) => {
+      const title = String(n.label || n.id || 'demo')
+      return {
+        id: n.id,
+        label: title.length > 16 ? `${title.slice(0, 15)}…` : title,
+        position: fibSphere(i, Math.max(10, 1), R_DEMOS),
+        size: 0.14,
+        color: NODE_DEMO,
+        labelColor: NODE_DEMO,
+        shell: 'demos',
+        showLabel: true,
+        type: 'demo',
+        data: n.meta || n,
+      }
+    })
+
   const main = [...inner, ...mid, ...outer]
-  return { mid, main, news, updates }
+  return { mid, main, news, updates, demos: demoNodes }
 }
 
 function shellLinks(nodes, radius, maxLinks = 28) {
@@ -291,14 +315,40 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
   const root = useRef()
   const newsLayer = useRef()
   const updatesLayer = useRef()
-  const { mid, main, news, updates } = useMemo(
+  const demosLayer = useRef()
+  const { mid, main, news, updates, demos } = useMemo(
     () => buildNodes(graphProjection, repos, hnStories),
     [graphProjection, repos, hnStories],
   )
 
+  const pulseIds = useMemo(() => {
+    const now = Date.now() / 1000
+    const set = new Set()
+    for (const p of graphProjection?.pulses || []) {
+      const age = typeof p.ts === 'number' ? now - p.ts : 0
+      if (age >= 0 && age < 45) {
+        if (p.node_id) set.add(String(p.node_id))
+        // Also pulse core on any recent bus event
+        set.add('jarvis')
+      }
+    }
+    // Demo / research / action events → pulse matching nodes
+    for (const p of graphProjection?.pulses || []) {
+      const reason = String(p.reason || '')
+      if (reason.includes('demo') || reason.includes('research')) {
+        for (const d of demos || []) set.add(d.id)
+      }
+      if (reason.includes('action') || reason.includes('confirm')) {
+        set.add('jarvis')
+      }
+    }
+    return set
+  }, [graphProjection?.pulses, demos])
+
   const midLinks = useMemo(() => shellLinks(mid, R_MID, 48), [mid])
   const newsLinks = useMemo(() => shellLinks(news, R_NEWS, 24), [news])
   const updateLinks = useMemo(() => shellLinks(updates, R_UPDATES, 24), [updates])
+  const demoLinks = useMemo(() => shellLinks(demos, R_DEMOS, 16), [demos])
 
   useFrame((_, dt) => {
     if (root.current) {
@@ -310,9 +360,9 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         root.current.rotation.x = Math.max(-0.7, Math.min(0.7, root.current.rotation.x))
       }
     }
-    // Counter-rotate signal layers slightly so shells read as distinct
     if (newsLayer.current && spinEnabled) newsLayer.current.rotation.y -= dt * 0.018
     if (updatesLayer.current && spinEnabled) updatesLayer.current.rotation.y += dt * 0.012
+    if (demosLayer.current && spinEnabled) demosLayer.current.rotation.y -= dt * 0.01
   })
 
   const pick = (n) =>
@@ -323,7 +373,9 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
           ? n.data?.title || n.label
           : n.type === 'update'
             ? n.data?.short || n.label
-            : n.label || n.id,
+            : n.type === 'demo'
+              ? n.data?.title || n.label
+              : n.label || n.id,
       type: n.type,
       data: n.data,
       position: n.position,
@@ -340,6 +392,7 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         labelColor={n.labelColor}
         showLabel={n.showLabel}
         selected={selectedId === n.id}
+        pulsing={pulseIds.has(n.id) || (n.type === 'repo' && pulseIds.has(`repo:${n.label}`))}
         onSelect={() => pick(n)}
       />
     ))
@@ -350,6 +403,7 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
       <pointLight position={[0, 0, 0]} intensity={1.1} distance={20} color={NODE_LIGHT} />
       <pointLight position={[4, 3, 5]} intensity={0.35} distance={22} color={NODE_NEWS} />
       <pointLight position={[-3, -2, 4]} intensity={0.3} distance={22} color={NODE_GOLD} />
+      <pointLight position={[5, -3, 3]} intensity={0.25} distance={22} color={NODE_DEMO} />
       <pointLight position={[6, 5, 4]} intensity={0.4} distance={28} color="#ffffff" />
 
       <Core />
@@ -358,6 +412,7 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
       <WireSphere radius={R_OUTER} color={MESH_DIM} opacity={0.14} segments={28} />
       <WireSphere radius={R_NEWS} color={MESH_NEWS} opacity={0.16} segments={30} />
       <WireSphere radius={R_UPDATES} color={MESH_GOLD} opacity={0.14} segments={26} />
+      <WireSphere radius={R_DEMOS} color={MESH_DEMO} opacity={0.14} segments={24} />
 
       {midLinks.map(([a, b], i) => (
         <Line key={`m-${i}`} a={a} b={b} color={MESH} opacity={0.22} />
@@ -375,7 +430,6 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
 
       {renderDots(main)}
 
-      {/* Purple news layer */}
       <group ref={newsLayer}>
         {news.map((n) => (
           <Line key={`nr-${n.id}`} a={[0, 0, 0]} b={n.position} color={NODE_NEWS} opacity={0.2} />
@@ -386,7 +440,6 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         {renderDots(news)}
       </group>
 
-      {/* Gold updates layer */}
       <group ref={updatesLayer}>
         {updates.map((n) => (
           <Line key={`ur-${n.id}`} a={[0, 0, 0]} b={n.position} color={NODE_GOLD} opacity={0.2} />
@@ -396,27 +449,40 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         ))}
         {renderDots(updates)}
       </group>
+
+      <group ref={demosLayer}>
+        {demos.map((n) => (
+          <Line key={`dr-${n.id}`} a={[0, 0, 0]} b={n.position} color={NODE_DEMO} opacity={0.22} />
+        ))}
+        {demoLinks.map(([a, b], i) => (
+          <Line key={`dl-${i}`} a={a} b={b} color={NODE_DEMO} opacity={0.14} />
+        ))}
+        {renderDots(demos)}
+      </group>
     </group>
   )
 }
 
-function GraphHud({ gestureOn, gesture, spinEnabled }) {
+function GraphHud({ gestureOn, gesture, spinEnabled, inset = {} }) {
   const source = gesture?.source === 'opencv' ? 'OpenCV' : gesture?.source === 'browser' ? 'MediaPipe' : 'hands'
   const waiting =
     gesture?.source === 'opencv'
       ? 'Waiting for OpenCV…'
       : 'Show palm to rotate · pinch zoom · point select'
+  const left = inset.left ?? 12
+  const bottom = inset.bottom ?? 12
   return (
     <div
       style={{
         position: 'absolute',
-        left: 12,
-        bottom: 12,
+        left,
+        bottom,
         zIndex: 5,
+        maxWidth: inset.maxWidth || 320,
         fontFamily: 'var(--font-mono)',
         fontSize: 11,
         color: 'var(--text-dim)',
-        background: 'rgba(0,8,16,0.55)',
+        background: 'rgba(0,8,16,0.82)',
         border: '1px solid rgba(0,200,255,0.12)',
         padding: '8px 10px',
         borderRadius: 4,
@@ -452,9 +518,9 @@ function GraphHud({ gestureOn, gesture, spinEnabled }) {
         <>
           MOUSE · drag orbit · scroll zoom
           <br />
-          KEYS · ←→↑↓ rotate · +/− zoom · 1–9 select · R reset · S spin
+          KEYS · ←→↑↓ · +/− · 1–9 · R reset · S spin
           <br />
-          LAYERS · repos · purple news · gold updates
+          LAYERS · repos · purple news · gold updates · jade demos
         </>
       )}
       <br />
@@ -463,7 +529,7 @@ function GraphHud({ gestureOn, gesture, spinEnabled }) {
   )
 }
 
-export default function BrainGraph() {
+export default function BrainGraph({ hudInset } = {}) {
   const graphProjection = useJarvisStore((s) => s.graphProjection)
   const repos = useJarvisStore((s) => s.repos)
   const hnStories = useJarvisStore((s) => s.hnStories)
@@ -656,7 +722,12 @@ export default function BrainGraph() {
           target={[0, 0, 0]}
         />
       </Canvas>
-      <GraphHud gestureOn={gestureControlEnabled} gesture={gestureLatest} spinEnabled={graphSpinEnabled} />
+      <GraphHud
+        gestureOn={gestureControlEnabled}
+        gesture={gestureLatest}
+        spinEnabled={graphSpinEnabled}
+        inset={hudInset}
+      />
     </div>
   )
 }

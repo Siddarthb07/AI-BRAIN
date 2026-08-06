@@ -1,78 +1,75 @@
 'use client'
 
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { useJarvisStore } from '../app/store'
 import { formatIstEventWhen, formatIstEventDateTime } from '../lib/time'
-
-import { API_BASE } from '../lib/api'
+import { resolveApiBase } from '../lib/api'
+import { AMERICAN_VOICE_MATCHERS, clipForSpeech, createStreamingSpeaker, speakText } from '../lib/speech'
+import { routeVoiceCommand } from '../lib/voiceCommands'
 
 const BrainGraph = lazy(() => import('./BrainGraph'))
 
-const API = API_BASE
+const api = () => resolveApiBase()
 
 const glass = {
-  background: 'rgba(0, 8, 18, 0.72)',
+  background: 'rgba(12, 10, 18, 0.88)',
   backdropFilter: 'blur(14px)',
-  border: '1px solid rgba(0, 200, 255, 0.16)',
-  borderRadius: '4px',
-  boxShadow: '0 0 28px rgba(0, 200, 255, 0.05)',
+  border: '1px solid rgba(255, 170, 80, 0.16)',
+  borderRadius: '8px',
+  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
 }
 
 function SectionLabel({ children }) {
-  return (
-    <div
-      style={{
-        fontFamily: 'var(--font-display)',
-        fontSize: '15px',
-        letterSpacing: '0.14em',
-        color: 'var(--cyan)',
-        marginBottom: '12px',
-        opacity: 0.95,
-      }}
-    >
-      {children}
-    </div>
-  )
+  return <div className="left-panel-label">{children}</div>
 }
 
 function StatusRow({ label, ok, detail, standby = false }) {
   const lit = ok || standby
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '10px',
-        marginBottom: '10px',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span
-          style={{
-            width: 9,
-            height: 9,
-            borderRadius: '50%',
-            background: ok ? 'var(--cyan)' : standby ? 'rgba(0,200,255,0.35)' : 'var(--text-dim)',
-            boxShadow: ok ? '0 0 6px var(--cyan-dim)' : 'none',
-            flexShrink: 0,
-          }}
-        />
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '16px',
-            color: lit ? 'var(--text-primary)' : 'var(--text-dim)',
-            letterSpacing: '0.05em',
-          }}
-        >
+    <div className="left-status-row">
+      <div className="left-status-left">
+        <span className={`left-status-dot${ok ? ' is-on' : standby ? ' is-standby' : ''}`} />
+        <span className="left-status-name" style={{ color: lit ? 'var(--text-primary)' : 'var(--text-dim)' }}>
           {label}
         </span>
       </div>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-dim)' }}>
-        {detail || (ok ? 'ONLINE' : standby ? 'STANDBY' : 'OFFLINE')}
-      </span>
+      <span className="left-status-detail">{detail || (ok ? 'Online' : standby ? 'Standby' : 'Offline')}</span>
     </div>
+  )
+}
+
+function AttentionChip({ label, ok, detail, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        borderRadius: 4,
+        border: `1px solid ${ok ? 'rgba(0,200,255,0.35)' : 'rgba(255,255,255,0.08)'}`,
+        background: ok ? 'rgba(0,200,255,0.08)' : 'rgba(0,0,0,0.25)',
+        color: ok ? 'var(--cyan)' : 'var(--text-dim)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+        letterSpacing: '0.06em',
+        cursor: onClick ? 'pointer' : 'default',
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: ok ? 'var(--cyan)' : 'var(--text-dim)',
+          boxShadow: ok ? '0 0 6px var(--cyan)' : 'none',
+        }}
+      />
+      {label}
+      {detail ? <span style={{ opacity: 0.65 }}>{detail}</span> : null}
+    </button>
   )
 }
 
@@ -115,6 +112,7 @@ export default function DashboardPanel() {
   const healthState = useJarvisStore((s) => s.healthState)
   const checkBackendHealth = useJarvisStore((s) => s.checkBackendHealth)
   const fetchGraph = useJarvisStore((s) => s.fetchGraph)
+  const graphProjection = useJarvisStore((s) => s.graphProjection)
   const setShellMode = useJarvisStore((s) => s.setShellMode)
   const setActivePanel = useJarvisStore((s) => s.setActivePanel)
   const setLayoutMode = useJarvisStore((s) => s.setLayoutMode)
@@ -126,20 +124,37 @@ export default function DashboardPanel() {
   const setGesturePreviewVisible = useJarvisStore((s) => s.setGesturePreviewVisible)
   const toggleGestures = useJarvisStore((s) => s.toggleGestures)
   const statusMsg = useJarvisStore((s) => s.statusMsg)
+  const setStatusMsg = useJarvisStore((s) => s.setStatusMsg)
+  const setVoiceState = useJarvisStore((s) => s.setVoiceState)
   const selectedNode = useJarvisStore((s) => s.selectedNode)
   const contextState = useJarvisStore((s) => s.contextState)
   const fetchContext = useJarvisStore((s) => s.fetchContext)
   const setActiveProject = useJarvisStore((s) => s.setActiveProject)
   const repos = useJarvisStore((s) => s.repos)
+  const openDemo = useJarvisStore((s) => s.openDemo)
 
   const [vaultLine, setVaultLine] = useState('')
   const [dockInput, setDockInput] = useState('')
   const [savingVault, setSavingVault] = useState(false)
   const [focusDraft, setFocusDraft] = useState('')
   const [savingFocus, setSavingFocus] = useState(false)
+  const [demos, setDemos] = useState([])
+  const [researchBusy, setResearchBusy] = useState(false)
+  const [speakingBrief, setSpeakingBrief] = useState(false)
+  const [dockBusy, setDockBusy] = useState(false)
 
   const ingestGitHub = useJarvisStore((s) => s.ingestGitHub)
   const pollIngestStatus = useJarvisStore((s) => s.pollIngestStatus)
+
+  const refreshDemos = useCallback(async () => {
+    try {
+      const res = await fetch(`${api()}/demos`, { cache: 'no-store' })
+      const data = await res.json()
+      setDemos((data.demos || []).slice(0, 5))
+    } catch {
+      setDemos([])
+    }
+  }, [])
 
   useEffect(() => {
     const boot = async () => {
@@ -151,10 +166,13 @@ export default function DashboardPanel() {
       fetchGoogleCalendarStatus({ silent: true })
       fetchVaultStatus()
       fetchVaultNotes()
+      refreshDemos()
       const state = useJarvisStore.getState()
-      setFocusDraft(state.contextState?.active_project && state.contextState.active_project !== 'unset'
-        ? state.contextState.active_project
-        : '')
+      setFocusDraft(
+        state.contextState?.active_project && state.contextState.active_project !== 'unset'
+          ? state.contextState.active_project
+          : ''
+      )
       const graphRepos = (state.graphProjection?.nodes || []).filter((n) => n.type === 'repo')
       if (!(state.repos && state.repos.length) && graphRepos.length === 0) {
         await ingestGitHub('Siddarthb07')
@@ -175,16 +193,24 @@ export default function DashboardPanel() {
     fetchVaultStatus,
     ingestGitHub,
     pollIngestStatus,
+    refreshDemos,
   ])
+
+  // Live graph pulses
+  useEffect(() => {
+    const id = setInterval(() => {
+      void fetchGraph({ limit: 120 })
+      void checkBackendHealth({ silent: true, repairStatus: false })
+    }, 12000)
+    return () => clearInterval(id)
+  }, [fetchGraph, checkBackendHealth])
 
   const priorities = (brief?.priority_actions || []).slice(0, 3)
   const nextEvents = (googleCalendar?.events || brief?.calendar_events || []).slice(0, 4)
   const llm = healthState?.llm || {}
-  const primary = llm.primary || 'ollama'
-  const model =
-    primary === 'groq'
-      ? llm.groq_model || '—'
-      : llm.ollama_model || '—'
+  const primary = llm.primary || 'groq'
+  const model = primary === 'groq' ? llm.groq_model || '—' : llm.ollama_model || '—'
+  const researchModel = llm.research_model || 'groq/compound'
   const vaultOk = Boolean(vaultStatus?.configured || vaultStatus?.vault_path || healthState.vault_configured)
   const activeProject = contextState?.active_project || brief?.active_project || 'unset'
   const focusRepo = useJarvisStore((s) => s.focusRepo)
@@ -192,7 +218,13 @@ export default function DashboardPanel() {
     (selectedNode?.type === 'repo' && (selectedNode.label || selectedNode.data?.name)) ||
     focusRepo ||
     activeProject
-  const repoSuggestions = (repos || []).slice(0, 8).map((r) => r.name).filter(Boolean)
+  const repoSuggestions = (repos || [])
+    .slice(0, 8)
+    .map((r) => r.name)
+    .filter(Boolean)
+  const pulseCount = (graphProjection?.pulses || []).length
+  const demoNodeCount = (graphProjection?.nodes || []).filter((n) => n.type === 'demo').length
+  const demoCount = Math.max(demos.length, demoNodeCount)
 
   const saveFocus = async (name) => {
     const project = (name || focusDraft || '').trim()
@@ -225,21 +257,151 @@ export default function DashboardPanel() {
   const handleDockSubmit = async (e) => {
     e.preventDefault()
     const msg = dockInput.trim()
-    if (!msg) return
+    if (!msg || dockBusy) return
     setDockInput('')
-    setShellMode('work')
-    setLayoutMode('work')
-    setActivePanel('chat')
-    await sendChat(msg)
+    setDockBusy(true)
+
+    let routed = null
+    try {
+      routed = await routeVoiceCommand(msg, () => useJarvisStore.getState())
+      if (routed.handled) {
+        if (routed.speak) {
+          setVoiceState('speaking')
+          await speakText(routed.speak, {
+            preferBrowser: true,
+            browserOnly: true,
+            lang: 'en-US',
+            rate: 1.08,
+            voiceMatchers: AMERICAN_VOICE_MATCHERS,
+          })
+          setVoiceState('idle')
+        }
+        if (!(routed.streamChat && routed.chat)) {
+          setDockBusy(false)
+          return
+        }
+      }
+
+      const chatMsg = routed?.streamChat && routed.chat ? routed.chat : msg
+      const lower = chatMsg.toLowerCase()
+      const isBuild = /\b(build|make|create)\b.*\b(website|site|landing|demo)\b/.test(lower)
+      const isResearch = /\b(research|report|search the web|look up)\b/.test(lower)
+
+      if (isBuild) {
+        setShellMode('lab')
+        setLayoutMode('lab')
+        setActivePanel('demos')
+      }
+
+      const speaker = createStreamingSpeaker({
+        lang: 'en-US',
+        rate: 1.08,
+        voiceMatchers: AMERICAN_VOICE_MATCHERS,
+        onStart: () => setVoiceState('speaking'),
+        onEnd: () => setVoiceState('idle'),
+      })
+
+      await sendChat(chatMsg, {
+        onToken: (delta) => {
+          void speaker.push(delta)
+        },
+      })
+      await speaker.end()
+      if (isBuild) refreshDemos()
+      void fetchGraph({ limit: 120 })
+      if (isResearch) void fetchGraph({ limit: 120 })
+    } catch {
+      setVoiceState('idle')
+      setStatusMsg('DOCK QUERY FAILED')
+    } finally {
+      setDockBusy(false)
+    }
   }
 
   const handleAskNode = async () => {
     if (!selectedNode) return
     const label = selectedNode.label || selectedNode.id || 'node'
-    setShellMode('work')
-    setLayoutMode('work')
-    setActivePanel('chat')
-    await sendChat(`Tell me about ${label}`)
+    if (selectedNode.type === 'demo' && selectedNode.data?.id) {
+      openDemo(selectedNode.data.id)
+      setShellMode('lab')
+      setLayoutMode('lab')
+      return
+    }
+    setDockBusy(true)
+    const speaker = createStreamingSpeaker({
+      lang: 'en-US',
+      rate: 1.08,
+      voiceMatchers: AMERICAN_VOICE_MATCHERS,
+      onStart: () => setVoiceState('speaking'),
+      onEnd: () => setVoiceState('idle'),
+    })
+    try {
+      await sendChat(`Tell me about ${label}`, {
+        onToken: (d) => {
+          void speaker.push(d)
+        },
+      })
+      await speaker.end()
+    } finally {
+      setDockBusy(false)
+    }
+  }
+
+  const readBriefAloud = async () => {
+    if (speakingBrief) return
+    const lines = [
+      brief?.greeting,
+      ...(priorities || []).map((item, i) => `Priority ${i + 1}: ${typeof item === 'string' ? item : item?.text || ''}`),
+    ]
+      .filter(Boolean)
+      .join('. ')
+    const text = clipForSpeech(lines || 'No brief available.')
+    setSpeakingBrief(true)
+    setVoiceState('speaking')
+    const ok = await speakText(text, {
+      preferBrowser: true,
+      preferBackend: false,
+      browserOnly: true,
+      rate: 1.05,
+      voiceMatchers: AMERICAN_VOICE_MATCHERS,
+      onEnd: () => {
+        setSpeakingBrief(false)
+        setVoiceState('idle')
+      },
+    })
+    if (!ok) {
+      setSpeakingBrief(false)
+      setVoiceState('idle')
+    }
+  }
+
+  const runQuickResearch = async () => {
+    const q = dockInput.trim() || (activeProject !== 'unset' ? String(activeProject) : '')
+    if (!q) {
+      setStatusMsg('TYPE A TOPIC IN THE DOCK, THEN RESEARCH')
+      return
+    }
+    setResearchBusy(true)
+    setDockInput('')
+    const speaker = createStreamingSpeaker({
+      lang: 'en-US',
+      rate: 1.05,
+      voiceMatchers: AMERICAN_VOICE_MATCHERS,
+      onStart: () => setVoiceState('speaking'),
+      onEnd: () => setVoiceState('idle'),
+    })
+    try {
+      const prompt = /\bresearch\b/i.test(q) ? q : `Research ${q} and generate a report`
+      await sendChat(prompt, {
+        onToken: (d) => {
+          void speaker.push(d)
+        },
+      })
+      await speaker.end()
+      void fetchGraph({ limit: 120 })
+    } finally {
+      setResearchBusy(false)
+    }
   }
 
   const goWork = (panel) => {
@@ -256,10 +418,9 @@ export default function DashboardPanel() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-void)' }}>
-      {/* Memory map — full bleed */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
         <Suspense fallback={<BrainLoading />}>
-          <BrainGraph />
+          <BrainGraph hudInset={{ left: 336, bottom: 78, maxWidth: 280 }} />
         </Suspense>
         <div
           style={{
@@ -273,7 +434,7 @@ export default function DashboardPanel() {
         <div
           style={{
             position: 'absolute',
-            top: '18%',
+            top: '16%',
             left: '50%',
             transform: 'translateX(-50%)',
             fontFamily: 'var(--font-display)',
@@ -283,376 +444,358 @@ export default function DashboardPanel() {
             opacity: 0.35,
             pointerEvents: 'none',
             zIndex: 1,
+            textAlign: 'center',
           }}
         >
           MEMORY MAP
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', letterSpacing: '0.12em', opacity: 0.8 }}>
+            {pulseCount} pulses · {demoNodeCount} demos
+          </div>
         </div>
       </div>
 
-      {/* Left glass rail */}
+      {/* Attention strip */}
+      <div
+        style={{
+          ...glass,
+          position: 'absolute',
+          top: 12,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 4,
+          width: 'min(920px, calc(100% - 580px))',
+          padding: '8px 10px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'auto',
+          background: 'rgba(0, 8, 18, 0.7)',
+        }}
+      >
+        <AttentionChip label="GROQ" ok={Boolean(healthState.groq)} detail={String(model).split('/').pop()?.slice(0, 14)} />
+        <AttentionChip label="RESEARCH" ok={Boolean(healthState.groq)} detail="compound" onClick={() => setDockInput('Research ')} />
+        <AttentionChip label="VISION" ok={Boolean(healthState.groq)} detail="qwen" onClick={() => goLab('vision')} />
+        <AttentionChip label="DEMOS" ok={demoCount > 0} detail={String(demoCount)} onClick={() => goLab('demos')} />
+        <AttentionChip label="QDRANT" ok={Boolean(healthState.qdrant)} />
+        <AttentionChip label="VAULT" ok={vaultOk} />
+        <AttentionChip label="HOUSE" ok={false} detail="PARKED" />
+        <AttentionChip label="CAL" ok={Boolean(googleCalendar.connected)} onClick={() => goWork('calendar')} />
+      </div>
+
+      {/* Left rail */}
       <aside
+        className="left-panel"
         style={{
           ...glass,
           position: 'absolute',
           top: 14,
           left: 14,
           bottom: 14,
-          width: 268,
-          height: 'auto',
+          width: 308,
           maxHeight: 'calc(100% - 28px)',
           zIndex: 2,
-          padding: '14px 14px 12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 0,
           overflowY: 'auto',
-          overflowX: 'hidden',
           pointerEvents: 'auto',
-          background: 'rgba(0, 8, 18, 0.58)',
+          background: 'rgba(10, 8, 16, 0.88)',
+          borderColor: 'rgba(255, 170, 80, 0.16)',
         }}
       >
-        <SectionLabel>SYSTEMS</SectionLabel>
-        <StatusRow
-          label="GROQ"
-          ok={Boolean(healthState.groq)}
-          detail={healthState.groq ? (primary === 'groq' ? 'ACTIVE' : 'ONLINE') : 'OFFLINE'}
-        />
-        <StatusRow
-          label="OLLAMA"
-          ok={Boolean(healthState.ollama)}
-          standby={!healthState.ollama && Boolean(healthState.groq)}
-          detail={
-            healthState.ollama
-              ? primary === 'ollama'
-                ? 'ACTIVE'
-                : 'ONLINE'
-              : healthState.groq
-                ? 'STANDBY'
-                : 'OFFLINE'
-          }
-        />
-        <StatusRow label="QDRANT" ok={Boolean(healthState.qdrant)} />
-        <StatusRow label="VAULT" ok={vaultOk} />
-        {healthState.demo_mode ? (
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '13px',
-              color: 'var(--gold)',
-              marginTop: '4px',
-              marginBottom: '4px',
-              letterSpacing: '0.06em',
-            }}
-          >
-            DEMO MODE
-          </div>
-        ) : null}
-
-        <div style={{ height: 1, background: 'rgba(0,200,255,0.1)', margin: '14px 0' }} />
-
-        <SectionLabel>LLM STATUS</SectionLabel>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--text-primary)', marginBottom: '6px' }}>
-          PRIMARY · {String(primary).toUpperCase()}
-        </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '4px' }}>
-          MODEL · {model}
-        </div>
-        {llm.last_provider ? (
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-dim)' }}>
-            LAST · {String(llm.last_provider).toUpperCase()}
-          </div>
-        ) : null}
-
-        <div style={{ height: 1, background: 'rgba(255,170,60,0.15)', margin: '14px 0' }} />
-
-        <SectionLabel>FOCUS</SectionLabel>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--amber)', marginBottom: '10px' }}>
-          {chatFocus === 'unset' ? 'NO PROJECT SET' : chatFocus}
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            saveFocus()
-          }}
-          style={{ display: 'flex', gap: 8, marginBottom: 10 }}
-        >
-          <input
-            className="input-cyber"
-            value={focusDraft}
-            onChange={(e) => setFocusDraft(e.target.value)}
-            placeholder="Active project…"
-            list="focus-repo-suggestions"
-            style={{ flex: 1, fontSize: 15, padding: '10px 12px' }}
+        <div className="left-panel-section">
+          <SectionLabel>Systems</SectionLabel>
+          <StatusRow label="Groq" ok={Boolean(healthState.groq)} detail={healthState.groq ? 'Active' : 'Offline'} />
+          <StatusRow
+            label="Ollama"
+            ok={Boolean(healthState.ollama)}
+            standby={!healthState.ollama && Boolean(healthState.groq)}
+            detail={healthState.ollama ? 'Online' : healthState.groq ? 'Standby' : 'Offline'}
           />
-          <datalist id="focus-repo-suggestions">
-            {repoSuggestions.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-          <button type="submit" className="btn" disabled={savingFocus || !focusDraft.trim()} style={{ fontSize: 13 }}>
-            SET
-          </button>
-        </form>
-        <div className="scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          {repoSuggestions.slice(0, 6).map((name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => saveFocus(name)}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                background: name === activeProject ? 'rgba(255,159,67,0.15)' : 'transparent',
-                border: 'none',
-                borderBottom: '1px solid rgba(255,170,60,0.08)',
-                color: name === activeProject ? 'var(--amber)' : 'var(--text-secondary)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 15,
-                padding: '10px 2px',
-                cursor: 'pointer',
-              }}
-            >
-              {name}
+          <StatusRow label="Qdrant" ok={Boolean(healthState.qdrant)} />
+          <StatusRow label="Vault" ok={vaultOk} />
+          <StatusRow label="House" ok={false} detail="Parked" />
+        </div>
+
+        <div className="left-panel-section">
+          <SectionLabel>Models</SectionLabel>
+          <div className="left-kv">
+            <div className="left-kv-row">
+              <span className="left-kv-key">Primary</span>
+              <span className="left-kv-val">{String(primary).toUpperCase()}</span>
+            </div>
+            <div className="left-kv-row">
+              <span className="left-kv-key">Chat</span>
+              <span className="left-kv-val">{model}</span>
+            </div>
+            <div className="left-kv-row">
+              <span className="left-kv-key">Research</span>
+              <span className="left-kv-val">{researchModel}</span>
+            </div>
+            {llm.last_provider ? (
+              <div className="left-kv-row">
+                <span className="left-kv-key">Last</span>
+                <span className="left-kv-val">{String(llm.last_provider)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="left-panel-section" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <SectionLabel>Focus</SectionLabel>
+          <div className="left-focus-name">{chatFocus === 'unset' ? 'No project set' : chatFocus}</div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              saveFocus()
+            }}
+            style={{ display: 'flex', gap: 8, marginBottom: 12 }}
+          >
+            <input
+              className="input-cyber"
+              value={focusDraft}
+              onChange={(e) => setFocusDraft(e.target.value)}
+              placeholder="Active project…"
+              list="focus-repo-suggestions"
+              style={{ flex: 1, fontSize: 14, padding: '10px 12px', fontFamily: 'var(--font-body)' }}
+            />
+            <datalist id="focus-repo-suggestions">
+              {repoSuggestions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <button type="submit" className="btn" disabled={savingFocus || !focusDraft.trim()} style={{ fontSize: 12 }}>
+              Set
             </button>
-          ))}
+          </form>
+          <div className="scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {repoSuggestions.slice(0, 6).map((name) => (
+              <button
+                key={name}
+                type="button"
+                className={`left-list-btn${name === activeProject ? ' is-active' : ''}`}
+                onClick={() => saveFocus(name)}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
         </div>
       </aside>
 
-      {/* Right glass rail — full height, scrollable so CAPTURE / vault path aren't clipped */}
+      {/* Right rail */}
       <aside
+        className="left-panel"
         style={{
           ...glass,
           position: 'absolute',
           top: 14,
           right: 14,
           bottom: 14,
-          width: 280,
-          height: 'auto',
+          width: 292,
           maxHeight: 'calc(100% - 28px)',
           zIndex: 2,
-          padding: '14px 14px 12px',
-          display: 'flex',
-          flexDirection: 'column',
           overflowY: 'auto',
           overflowX: 'hidden',
           pointerEvents: 'auto',
-          background: 'rgba(0, 8, 18, 0.58)',
+          background: 'rgba(10, 8, 16, 0.9)',
         }}
       >
-        <SectionLabel>BRIEF</SectionLabel>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', flexShrink: 0 }}>
-          {brief?.date || '—'}
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Brief</SectionLabel>
+          <div className="left-panel-meta" style={{ marginBottom: 10 }}>
+            {brief?.date || '—'}
+          </div>
+          <div
+            style={{
+              maxHeight: 110,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              marginBottom: 12,
+              paddingRight: 4,
+            }}
+          >
+            {priorities.length === 0 ? (
+              <div className="left-status-detail">No priorities</div>
+            ) : (
+              priorities.map((item, i) => (
+                <div key={i} className="left-status-row" style={{ alignItems: 'flex-start' }}>
+                  <span className="left-kv-key" style={{ width: 28, gridColumn: 'auto' }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span className="left-kv-val" style={{ fontSize: 14 }}>
+                    {typeof item === 'string' ? item : item?.text || item?.title || String(item)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn" style={{ fontSize: 12, flex: 1 }} onClick={() => goWork('brief')}>
+              Open
+            </button>
+            <button type="button" className="btn" style={{ fontSize: 12, flex: 1 }} disabled={speakingBrief} onClick={readBriefAloud}>
+              {speakingBrief ? '…' : 'Read'}
+            </button>
+          </div>
         </div>
-        <div style={{ flex: '0 1 auto', minHeight: 0, maxHeight: 180, overflowY: 'auto', marginBottom: 4 }}>
-          {priorities.length === 0 ? (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '8px' }}>
-              No priorities
+
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Next up</SectionLabel>
+          {nextEvents.length === 0 ? (
+            <div className="left-panel-meta" style={{ marginBottom: 0 }}>
+              {googleCalendar.connected ? 'No upcoming events' : 'Calendar offline'}
             </div>
           ) : (
-            priorities.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  gap: '10px',
-                  marginBottom: '10px',
-                  fontFamily: 'var(--font-body)',
-                  fontSize: '15px',
-                  color: 'var(--text-primary)',
-                  lineHeight: 1.35,
-                }}
-              >
-                <span style={{ color: 'var(--cyan)', fontFamily: 'var(--font-mono)', fontSize: '14px', flexShrink: 0 }}>
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <span>{typeof item === 'string' ? item : item?.text || item?.title || String(item)}</span>
-              </div>
-            ))
-          )}
-        </div>
-        <button
-          type="button"
-          className="btn"
-          style={{ fontSize: '13px', width: '100%', marginTop: '4px', marginBottom: '4px', padding: '10px 8px', flexShrink: 0 }}
-          onClick={() => goWork('brief')}
-        >
-          OPEN BRIEF
-        </button>
-
-        <div style={{ height: 1, background: 'rgba(0,200,255,0.1)', margin: '12px 0', flexShrink: 0 }} />
-
-        <SectionLabel>NEXT UP</SectionLabel>
-        <div className="scroll-area" style={{ maxHeight: 100, overflowY: 'auto', marginBottom: '4px', flexShrink: 0 }}>
-          {!googleCalendar.connected && !nextEvents.length ? (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-dim)' }}>
-              Calendar offline
-            </div>
-          ) : nextEvents.length === 0 ? (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-dim)' }}>No upcoming events</div>
-          ) : (
-            nextEvents.map((ev) => (
-              <div key={ev.id || `${ev.summary}-${ev.start}`} style={{ marginBottom: '10px' }}>
-                <div style={{ fontFamily: 'var(--font-body)', fontSize: '15px', color: 'var(--text-primary)' }}>
+            nextEvents.slice(0, 2).map((ev) => (
+              <div key={ev.id || `${ev.summary}-${ev.start}`} style={{ marginBottom: 10 }}>
+                <div className="left-status-name" style={{ fontSize: 14 }}>
                   {ev.summary || 'Untitled'}
                 </div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-dim)' }}>
-                  {formatWhen(ev)}
-                </div>
+                <div className="left-status-detail">{formatWhen(ev)}</div>
               </div>
             ))
           )}
         </div>
 
-        <div style={{ height: 1, background: 'rgba(0,200,255,0.1)', margin: '12px 0', flexShrink: 0 }} />
-
-        <SectionLabel>CAPTURE</SectionLabel>
-        <form onSubmit={handleVaultCapture} style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexShrink: 0 }}>
-          <input
-            className="input-cyber"
-            value={vaultLine}
-            onChange={(e) => setVaultLine(e.target.value)}
-            placeholder="One-line → vault"
-            style={{ flex: 1, fontSize: '14px', padding: '10px 12px', minWidth: 0 }}
-          />
-          <button type="submit" className="btn" disabled={savingVault || !vaultLine.trim()} style={{ fontSize: '13px' }}>
-            SAVE
-          </button>
-        </form>
-        <div
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '11px',
-            color: 'var(--text-dim)',
-            marginBottom: '4px',
-            lineHeight: 1.45,
-            wordBreak: 'break-all',
-            flexShrink: 0,
-          }}
-          title={vaultStatus?.path || vaultStatus?.vault_path || healthState.vault_path || ''}
-        >
-          {vaultStatus?.path || vaultStatus?.vault_path || healthState.vault_path || 'vault path pending'}
-        </div>
-
-        <div style={{ height: 1, background: 'rgba(0,200,255,0.1)', margin: '12px 0', flexShrink: 0 }} />
-
-        <SectionLabel>QUICK ACCESS</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: 10, flexShrink: 0 }}>
-          <button
-            type="button"
-            className="btn"
-            style={{
-              fontSize: '13px',
-              padding: '10px 8px',
-              borderColor: wakeEnabled ? 'var(--cyan)' : undefined,
-              color: wakeEnabled ? 'var(--cyan)' : undefined,
-              background: wakeEnabled ? 'rgba(0,200,255,0.1)' : undefined,
-            }}
-            onClick={() => setWakeEnabled(!wakeEnabled)}
-          >
-            {wakeEnabled ? 'WAKE ON' : 'WAKE OFF'}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            style={{
-              fontSize: '13px',
-              padding: '10px 8px',
-              borderColor: gestureControlEnabled ? 'var(--amber)' : undefined,
-              color: gestureControlEnabled ? 'var(--amber)' : undefined,
-              background: gestureControlEnabled ? 'rgba(255,159,67,0.1)' : undefined,
-            }}
-            onClick={() => {
-              void toggleGestures()
-            }}
-          >
-            {gestureControlEnabled ? 'GESTURES ON' : 'GESTURES OFF'}
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Demos</SectionLabel>
+          {demos.length === 0 ? (
+            <div className="left-panel-meta">Ask dock: build me a website for…</div>
+          ) : (
+            demos.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                className="left-list-btn"
+                onClick={() => {
+                  openDemo(d.id)
+                  goLab('demos')
+                }}
+              >
+                {d.title || d.id}
+                <span className="left-list-sub">{d.kit}</span>
+              </button>
+            ))
+          )}
+          <button type="button" className="btn" style={{ fontSize: 12, width: '100%', marginTop: 8 }} onClick={() => goLab('demos')}>
+            Open demos
           </button>
         </div>
-        {gestureControlEnabled ? (
-          <button
-            type="button"
-            className="btn"
-            style={{
-              fontSize: '12px',
-              padding: '8px',
-              width: '100%',
-              marginBottom: 8,
-              borderColor: gesturePreviewVisible ? 'var(--cyan)' : undefined,
-              color: gesturePreviewVisible ? 'var(--cyan)' : undefined,
-            }}
-            onClick={() => setGesturePreviewVisible(!gesturePreviewVisible)}
-          >
-            {gesturePreviewVisible ? 'HIDE HAND CAM' : 'SHOW HAND CAM'}
+
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Research</SectionLabel>
+          <div className="left-panel-meta">Topic in the dock → Research. Saves to vault Reports.</div>
+          <button type="button" className="btn" style={{ fontSize: 12, width: '100%' }} disabled={researchBusy} onClick={runQuickResearch}>
+            {researchBusy ? 'Researching…' : 'Research topic'}
           </button>
-        ) : null}
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-dim)', marginBottom: 12, flexShrink: 0 }}>
-          Wake: {wakeEnabled ? String(wakeStatus || 'armed').replace(/_/g, ' ') : 'off'} · Gestures: click requests camera
         </div>
 
-        <SectionLabel>COMMANDS</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', flexShrink: 0 }}>
-          <button type="button" className="btn" style={{ fontSize: '13px', padding: '10px 8px' }} onClick={() => goWork('chat')}>
-            WORK CHAT
-          </button>
-          <button type="button" className="btn" style={{ fontSize: '13px', padding: '10px 8px' }} onClick={() => goWork('house')}>
-            HOUSE
-          </button>
-          <button type="button" className="btn" style={{ fontSize: '13px', padding: '10px 8px' }} onClick={() => goWork('voice')}>
-            VOICE
-          </button>
-          <button type="button" className="btn" style={{ fontSize: '13px', padding: '10px 8px' }} onClick={() => goLab('vision')}>
-            VISION
-          </button>
-          <button
-            type="button"
-            className="btn"
-            style={{ fontSize: '13px', padding: '10px 8px' }}
-            onClick={() => goLab('wake')}
-          >
-            WAKE LAB
-          </button>
-          <button
-            type="button"
-            className="btn"
-            style={{ fontSize: '13px', padding: '10px 8px' }}
-            onClick={() => goLab('graph')}
-          >
-            LAB GRAPH
-          </button>
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Capture</SectionLabel>
+          <form onSubmit={handleVaultCapture} style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="input-cyber"
+              value={vaultLine}
+              onChange={(e) => setVaultLine(e.target.value)}
+              placeholder="One-line → vault"
+              style={{ flex: 1, fontSize: 14, padding: '10px 12px', minWidth: 0, fontFamily: 'var(--font-body)' }}
+            />
+            <button type="submit" className="btn" disabled={savingVault || !vaultLine.trim()} style={{ fontSize: 12 }}>
+              Save
+            </button>
+          </form>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '12px', flexShrink: 0 }}>
+
+        <div className="left-panel-section" style={{ flexShrink: 0 }}>
+          <SectionLabel>Commands</SectionLabel>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goWork('chat')}>
+              Chat
+            </button>
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goLab('demos')}>
+              Demos
+            </button>
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goWork('voice')}>
+              Voice
+            </button>
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goLab('vision')}>
+              Vision
+            </button>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: '10px 6px',
+                borderColor: wakeEnabled ? 'var(--amber)' : undefined,
+                color: wakeEnabled ? 'var(--amber)' : undefined,
+              }}
+              onClick={() => setWakeEnabled(!wakeEnabled)}
+            >
+              {wakeEnabled ? 'Wake on' : 'Wake'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: '10px 6px',
+                borderColor: gestureControlEnabled ? 'var(--amber)' : undefined,
+                color: gestureControlEnabled ? 'var(--amber)' : undefined,
+              }}
+              onClick={() => {
+                void toggleGestures()
+              }}
+            >
+              Gesture
+            </button>
+          </div>
+          {gestureControlEnabled ? (
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: 12, width: '100%', marginTop: 8 }}
+              onClick={() => setGesturePreviewVisible(!gesturePreviewVisible)}
+            >
+              {gesturePreviewVisible ? 'Hide hand cam' : 'Show hand cam'}
+            </button>
+          ) : null}
+          <div className="left-panel-meta" style={{ marginTop: 12, marginBottom: 0 }}>
+            Wake: {wakeEnabled ? String(wakeStatus || 'armed').replace(/_/g, ' ') : 'off'}
+          </div>
+        </div>
+
+        <div className="left-panel-meta" style={{ marginTop: 'auto', paddingTop: 14, marginBottom: 0 }}>
           {statusMsg}
         </div>
       </aside>
 
-      {/* Node inspector strip */}
       {selectedNode ? (
         <div
           style={{
             ...glass,
             position: 'absolute',
             left: '50%',
-            bottom: 70,
+            bottom: 78,
             transform: 'translateX(-50%)',
             zIndex: 3,
             width: 'min(640px, calc(100% - 580px))',
             padding: '10px 14px',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
+            gap: 12,
             pointerEvents: 'auto',
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', letterSpacing: '0.16em', color: 'var(--cyan)', marginBottom: 2 }}>
-              INSPECTOR
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, letterSpacing: '0.16em', color: 'var(--cyan)', marginBottom: 2 }}>
+              INSPECTOR · {String(selectedNode.type || 'node').toUpperCase()}
             </div>
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: '15px',
-                color: 'var(--text-primary)',
+                fontSize: 15,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -661,44 +804,65 @@ export default function DashboardPanel() {
               {selectedNode.label || selectedNode.id}
             </div>
           </div>
-          <button type="button" className="btn" style={{ fontSize: '13px' }} onClick={handleAskNode}>
-            ASK
+          <button type="button" className="btn" style={{ fontSize: 13 }} onClick={handleAskNode} disabled={dockBusy}>
+            {selectedNode.type === 'demo' ? 'OPEN' : 'ASK'}
           </button>
         </div>
       ) : null}
 
-      {/* Bottom ask dock */}
+      {/* Ask dock — live speak */}
       <div
+        className="dock-shell"
         style={{
           position: 'absolute',
           left: '50%',
-          bottom: 12,
+          bottom: 28,
           transform: 'translateX(-50%)',
           zIndex: 3,
-          width: 'min(680px, calc(100% - 580px))',
-          ...glass,
-          padding: '10px 12px',
+          width: 'min(720px, calc(100% - 620px))',
+          padding: '12px 14px',
           display: 'flex',
           alignItems: 'center',
-          gap: '10px',
+          gap: 10,
           pointerEvents: 'auto',
         }}
       >
-        <form onSubmit={handleDockSubmit} style={{ flex: 1, display: 'flex', gap: '8px' }}>
+        <form onSubmit={handleDockSubmit} style={{ flex: 1, display: 'flex', gap: 8 }}>
           <input
             className="input-cyber"
             value={dockInput}
             onChange={(e) => setDockInput(e.target.value)}
-            placeholder="Query JARVIS..."
-            style={{ flex: 1, fontSize: '15px', padding: '12px 14px' }}
+            placeholder="Ask · research · build a website…"
+            style={{ flex: 1, fontSize: 15, padding: '12px 14px', fontFamily: 'var(--font-body)' }}
           />
-          <button type="submit" className="btn" disabled={!dockInput.trim()} style={{ fontSize: '13px' }}>
-            SEND
+          <button type="submit" className="btn" disabled={!dockInput.trim() || dockBusy} style={{ fontSize: 13 }}>
+            {dockBusy ? '…' : 'Ask'}
           </button>
         </form>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-          PTT in Work
-        </div>
+        <button type="button" className="btn" style={{ fontSize: 12 }} disabled={researchBusy} onClick={runQuickResearch}>
+          Research
+        </button>
+        <button type="button" className="btn" style={{ fontSize: 12 }} onClick={() => goWork('voice')}>
+          PTT
+        </button>
+      </div>
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          bottom: 6,
+          transform: 'translateX(-50%)',
+          zIndex: 3,
+          width: 'min(720px, calc(100% - 620px))',
+          fontFamily: 'var(--font-body)',
+          fontSize: 12,
+          color: 'var(--text-dim)',
+          textAlign: 'center',
+          pointerEvents: 'none',
+          opacity: 0.8,
+        }}
+      >
+        Hold Space · say Jarvis · open demos · research … · voice commands
       </div>
     </div>
   )

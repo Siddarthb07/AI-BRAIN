@@ -46,8 +46,8 @@ export default function HousePanel() {
   const runEvening = async () => {
     setSceneBusy(true)
     try {
-      const API = (await import('../lib/api')).API_BASE
-      await fetch(`${API}/house/scene/evening`, { method: 'POST' })
+      const API = (await import('../lib/api')).resolveApiBase()
+      await fetch(`${api()}/house/scene/evening`, { method: 'POST' })
       await fetchHouseEntities()
     } finally {
       setSceneBusy(false)

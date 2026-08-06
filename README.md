@@ -44,12 +44,31 @@ pip install -r requirements.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8002 --reload
 
 cd ..\frontend
-echo NEXT_PUBLIC_API_URL=http://localhost:8002> .env.local
+echo NEXT_PUBLIC_API_URL=/backend> .env.local
 npm install
 npm run dev
 ```
 
-Open: **http://localhost:3000** (API on **http://localhost:8002**)
+Open: **http://localhost:3000** (API proxied at **/backend** → **:8002**)
+
+### Share with another laptop (internet)
+
+1. Keep backend + frontend running on this PC.
+2. Run:
+
+```batch
+scripts\expose-public.bat
+```
+
+3. Open the printed `https://….trycloudflare.com` URL on the other laptop.
+
+Same Wi-Fi only (no internet tunnel):
+
+```batch
+powershell -ExecutionPolicy Bypass -File scripts\expose-public.ps1 -LanOnly
+```
+
+Then start frontend bound to all interfaces: `npm run dev -- -H 0.0.0.0 -p 3000` and open `http://<your-lan-ip>:3000`. Prefer the Cloudflare tunnel for camera/mic (browsers require HTTPS off-localhost).
 
 ### Docker Compose
 
@@ -58,6 +77,8 @@ start.bat
 ```
 
 Open: **http://localhost:5050** (compose maps frontend :5050 → :3000, API :8001)
+
+**Demo builder:** In chat say `build me a website for …` (any brief), or use Lab → **Demos**. Generates a cinematic Vite site, previews in-panel, Save/Rebuild, optional Cloudflare **Publish**. House automation is parked.
 
 ---
 
@@ -317,7 +338,10 @@ jarvis-ai-brain/
 
 1. Open http://localhost:5050 — JARVIS HUD online
 2. Chat: `Remember the word ORBIT` → then `What word did I ask you to remember?` (multi-turn memory)
-3. Watch the reply **stream** token-by-token
+3. Watch the reply stream (Groq `openai/gpt-oss-120b`)
 4. Click **+ NEW** in Threads, send a different message, switch back — sessions isolate
-5. Brief tab → Read aloud (existing)
-6. *(Later weeks)* Dashboard graph pulse → Sim light → HA light
+5. Research: `Research Fourier neural operators and generate a report` → vault Reports
+6. Site builder: `build me a website for …` → Lab → Demos → Monaco → REBUILD → PUBLISH
+7. Lab → Vision (`qwen/qwen3.6-27b`); Voice Space-PTT; Wake opt-in; House disabled
+
+See **[DEMO.md](DEMO.md)** for the full beat sheet.

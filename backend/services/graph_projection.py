@@ -14,7 +14,7 @@ def _now() -> str:
 
 
 def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[str, Any]:
-    wanted = set(layers or ["core", "repos", "vault", "news", "local", "house", "actions"])
+    wanted = set(layers or ["core", "repos", "vault", "news", "local", "actions", "demos"])
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     pulses = [
@@ -108,6 +108,24 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
                 }
             )
             edges.append({"source": "jarvis", "target": aid, "kind": "pending", "weight": 1.2})
+
+    if "demos" in wanted:
+        try:
+            from services import demo_builder
+
+            for demo in demo_builder.list_demos(limit=12):
+                did = f"demo:{demo.get('id')}"
+                nodes.append(
+                    {
+                        "id": did,
+                        "type": "demo",
+                        "label": (demo.get("title") or demo.get("id") or "demo")[:40],
+                        "meta": demo,
+                    }
+                )
+                edges.append({"source": "jarvis", "target": did, "kind": "demo", "weight": 1.0})
+        except Exception as exc:
+            print(f"[graph] demos layer failed: {exc}")
 
     # Cap
     if len(nodes) > limit:

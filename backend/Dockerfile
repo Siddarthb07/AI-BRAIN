@@ -2,12 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for audio processing
+# System deps for audio + Node for demo Vite builds
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     espeak-ng \
     libsndfile1 \
     git \
+    curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

@@ -2,9 +2,9 @@
 import { useState, useRef, useCallback } from 'react'
 import { useJarvisStore } from '../app/store'
 
-import { API_BASE } from '../lib/api'
+import { resolveApiBase } from '../lib/api'
 
-const API = API_BASE
+const api = () => resolveApiBase()
 
 function DropZone({ onFiles }) {
   const [dragging, setDragging] = useState(false)
@@ -100,7 +100,7 @@ export default function LocalIngestPanel() {
     const form = new FormData()
     files.forEach(f => form.append('files', f))
     try {
-      const res = await fetch(`${API}/ingest/local/upload`, { method: 'POST', body: form })
+      const res = await fetch(`${api()}/ingest/local/upload`, { method: 'POST', body: form })
       const data = await res.json()
       setResults(prev => [...data.results.reverse(), ...prev].slice(0, 20))
       setStatusMsg(`INGESTED ${data.total_chunks} CHUNKS FROM ${data.files_processed} FILES`)
@@ -117,7 +117,7 @@ export default function LocalIngestPanel() {
     setDirLoading(true)
     setStatusMsg(`SCANNING ${dirPath}...`)
     try {
-      const res = await fetch(`${API}/ingest/local/directory`, {
+      const res = await fetch(`${api()}/ingest/local/directory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: dirPath.trim() })
@@ -142,7 +142,7 @@ export default function LocalIngestPanel() {
     setPasteLoading(true)
     setStatusMsg('INGESTING PASTE...')
     try {
-      const res = await fetch(`${API}/ingest/local/paste`, {
+      const res = await fetch(`${api()}/ingest/local/paste`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: pasteText, title: pasteTitle || 'Pasted Content', language: pasteLang })

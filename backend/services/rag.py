@@ -12,6 +12,8 @@ DATA_DIR.mkdir(exist_ok=True)
 LOCAL_STORE = DATA_DIR / "knowledge_store.json"
 
 _encoder = None
+_local_docs_cache: Optional[List[Dict]] = None
+_local_docs_mtime: float = 0.0
 
 def get_encoder():
     global _encoder
@@ -25,15 +27,30 @@ def get_encoder():
     return _encoder
 
 def load_local_store() -> List[Dict]:
+    global _local_docs_cache, _local_docs_mtime
     if LOCAL_STORE.exists():
         try:
-            return json.loads(LOCAL_STORE.read_text())
-        except:
+            mtime = LOCAL_STORE.stat().st_mtime
+            if _local_docs_cache is not None and mtime == _local_docs_mtime:
+                return _local_docs_cache
+            docs = json.loads(LOCAL_STORE.read_text(encoding="utf-8"))
+            _local_docs_cache = docs if isinstance(docs, list) else []
+            _local_docs_mtime = mtime
+            return _local_docs_cache
+        except Exception:
             pass
-    return []
+    _local_docs_cache = []
+    _local_docs_mtime = 0.0
+    return _local_docs_cache
 
 def save_local_store(docs: List[Dict]):
-    LOCAL_STORE.write_text(json.dumps(docs, indent=2))
+    global _local_docs_cache, _local_docs_mtime
+    LOCAL_STORE.write_text(json.dumps(docs, indent=2), encoding="utf-8")
+    _local_docs_cache = docs
+    try:
+        _local_docs_mtime = LOCAL_STORE.stat().st_mtime
+    except OSError:
+        _local_docs_mtime = 0.0
 
 async def add_document(text: str, metadata: Dict) -> bool:
     doc_id = hashlib.md5(text.encode()).hexdigest()
@@ -70,9 +87,11 @@ async def add_document(text: str, metadata: Dict) -> bool:
     return True
 
 async def search(query: str, top_k: int = 5, repo_name: Optional[str] = None) -> List[Dict]:
+    """Chat-hot-path search. Keyword-first; semantic encode is opt-in (RAG_SEMANTIC=1)."""
     results = []
     docs = load_local_store()
     stop = {"the", "a", "an", "my", "me", "about", "project", "repo", "repository", "what", "how", "can", "i", "it", "is", "are", "of", "to", "and", "for"}
+    semantic = os.getenv("RAG_SEMANTIC", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     def hydrate(hit: Dict) -> Dict:
         """Prefer full local text over Qdrant's truncated payload."""
@@ -98,66 +117,63 @@ async def search(query: str, top_k: int = 5, repo_name: Optional[str] = None) ->
             or target in str(meta.get("source") or "").lower()
         )
 
-    # Try Qdrant semantic search
-    try:
-        import httpx
-        encoder = get_encoder()
-        if encoder:
-            embedding = encoder.encode(query).tolist()
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/search",
-                    json={"vector": embedding, "limit": top_k * 3, "with_payload": True}
-                )
-                if resp.status_code == 200:
-                    hits = resp.json().get("result", [])
-                    raw = []
-                    for h in hits:
-                        payload = h.get("payload") or {}
-                        meta = {k: v for k, v in payload.items() if k != "text"}
-                        if not matches_repo(meta):
-                            continue
-                        raw.append({"text": payload.get("text", ""), "score": h.get("score", 0), "metadata": meta})
-                    results = [hydrate(r) for r in raw[:top_k]]
-    except Exception as e:
-        print(f"[RAG] Qdrant search failed: {e}")
+    # Keyword search first (ms) — keeps chat TTFT low
+    query_lower = query.lower()
+    words = [w for w in query_lower.replace("/", " ").split() if len(w) > 1 and w not in stop]
+    if repo_name:
+        words = list(dict.fromkeys([repo_name.lower(), *words]))
+    scored = []
+    for doc in docs:
+        meta = doc.get("metadata") or {}
+        if not matches_repo(meta):
+            continue
+        text_l = (doc.get("text") or "").lower()
+        score = 0.0
+        for word in words:
+            if word in text_l:
+                score += 2.0 if word == (repo_name or "").lower() else 1.0
+        dtype = meta.get("type")
+        if dtype == "repo_meta":
+            score += 3.0
+        elif dtype == "repo_structure":
+            score += 2.5
+        elif dtype == "code_file" and str(meta.get("path") or "").lower().endswith(("readme.md", "app.py", "main.py")):
+            score += 1.5
+        if score > 0:
+            scored.append({"text": doc.get("text") or "", "score": score, "metadata": meta})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    results = scored[:top_k]
 
-    # Fallback / supplement: keyword search local store
-    if len(results) < top_k:
-        query_lower = query.lower()
-        words = [w for w in query_lower.replace("/", " ").split() if len(w) > 1 and w not in stop]
-        if repo_name:
-            words = list(dict.fromkeys([repo_name.lower(), *words]))
-        scored = []
-        for doc in docs:
-            meta = doc.get("metadata") or {}
-            if not matches_repo(meta):
-                continue
-            text_l = (doc.get("text") or "").lower()
-            score = 0.0
-            for word in words:
-                if word in text_l:
-                    score += 2.0 if word == (repo_name or "").lower() else 1.0
-            # Boost structured project docs
-            dtype = meta.get("type")
-            if dtype == "repo_meta":
-                score += 3.0
-            elif dtype == "repo_structure":
-                score += 2.5
-            elif dtype == "code_file" and str(meta.get("path") or "").lower().endswith(("readme.md", "app.py", "main.py")):
-                score += 1.5
-            if score > 0:
-                scored.append({"text": doc.get("text") or "", "score": score, "metadata": meta})
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        seen_sources = {str((r.get("metadata") or {}).get("source")) for r in results}
-        for item in scored:
-            src = str((item.get("metadata") or {}).get("source"))
-            if src in seen_sources:
-                continue
-            results.append(item)
-            seen_sources.add(src)
-            if len(results) >= top_k:
-                break
+    # Optional semantic pass (cold SentenceTransformer load can cost 30–60s)
+    if semantic and len(results) < top_k:
+        try:
+            import asyncio
+            import httpx
+            encoder = get_encoder()
+            if encoder:
+                embedding = await asyncio.to_thread(lambda: encoder.encode(query).tolist())
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/search",
+                        json={"vector": embedding, "limit": top_k * 3, "with_payload": True}
+                    )
+                    if resp.status_code == 200:
+                        hits = resp.json().get("result", [])
+                        seen_sources = {str((r.get("metadata") or {}).get("source")) for r in results}
+                        for h in hits:
+                            payload = h.get("payload") or {}
+                            meta = {k: v for k, v in payload.items() if k != "text"}
+                            if not matches_repo(meta):
+                                continue
+                            src = str(meta.get("source") or "")
+                            if src in seen_sources:
+                                continue
+                            results.append(hydrate({"text": payload.get("text", ""), "score": h.get("score", 0), "metadata": meta}))
+                            seen_sources.add(src)
+                            if len(results) >= top_k:
+                                break
+        except Exception as e:
+            print(f"[RAG] Qdrant search failed: {e}")
 
     return results[:top_k]
 

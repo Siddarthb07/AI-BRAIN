@@ -1,10 +1,11 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
-import { API_BASE } from '../lib/api'
+import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, createStreamingSpeaker, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
+import { resolveApiBase } from '../lib/api'
+import { routeVoiceCommand, VOICE_COMMAND_HELP } from '../lib/voiceCommands'
 
-const API = API_BASE
+const api = () => resolveApiBase()
 const STATES = { idle: 'idle', recording: 'recording', processing: 'processing', speaking: 'speaking' }
 
 export default function VoicePanel() {
@@ -19,9 +20,14 @@ export default function VoicePanel() {
   const chunksRef = useRef([])
   const animRef = useRef(null)
   const recognitionRef = useRef(null)
+  const stateRef = useRef(STATES.idle)
 
   const sendChat = useJarvisStore(s => s.sendChat)
   const setVoiceState = useJarvisStore(s => s.setVoiceState)
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   // Animate wave bars when recording
   useEffect(() => {
@@ -49,7 +55,7 @@ export default function VoicePanel() {
         const form = new FormData()
         form.append('file', blob, 'audio.webm')
         try {
-          const res = await fetch(`${API}/voice/input`, { method: 'POST', body: form })
+          const res = await fetch(`${api()}/voice/input`, { method: 'POST', body: form })
           if (!res.ok) throw new Error(`STT HTTP ${res.status}`)
           const data = await res.json()
           const text = data.text || ''
@@ -136,25 +142,149 @@ export default function VoicePanel() {
     setState(STATES.processing)
   }
 
+  // Spacebar PTT when Voice panel is mounted
+  useEffect(() => {
+    const down = (e) => {
+      if (e.code !== 'Space' || e.repeat) return
+      const tag = (e.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return
+      e.preventDefault()
+      if (stateRef.current === STATES.idle) startRecording()
+    }
+    const up = (e) => {
+      if (e.code !== 'Space') return
+      if (stateRef.current === STATES.recording) stopRecording()
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useBackend])
+
   const processText = async (text) => {
     setState(STATES.processing)
-    const jarvisResponse = await sendChat(text)
-    setResponse(jarvisResponse)
-    setState(STATES.speaking)
-    setVoiceState('speaking')
-    await speakResponse(jarvisResponse)
+    setVoiceState('processing')
+
+    // UI commands first (same router as wake)
+    try {
+      const routed = await routeVoiceCommand(text, () => useJarvisStore.getState())
+      if (routed.handled) {
+        if (routed.speak) {
+          setState(STATES.speaking)
+          setVoiceState('speaking')
+          setResponse(routed.speak)
+          await playSpeech(routed.speak, {
+            preferBrowser: true,
+            preferBackend: false,
+            browserOnly: true,
+            lang: 'en-US',
+            rate: 1.08,
+            voiceMatchers: AMERICAN_VOICE_MATCHERS,
+          })
+        }
+        if (routed.streamChat && routed.chat) {
+          const speaker = createStreamingSpeaker({
+            lang: 'en-US',
+            rate: 1.08,
+            pitch: 1,
+            voiceMatchers: AMERICAN_VOICE_MATCHERS,
+            onStart: () => {
+              setState(STATES.speaking)
+              setVoiceState('speaking')
+            },
+            onEnd: () => {
+              setState(STATES.idle)
+              setVoiceState('idle')
+            },
+          })
+          const jarvisResponse = await sendChat(routed.chat, {
+            onToken: (delta) => {
+              void speaker.push(delta)
+            },
+          })
+          setResponse(jarvisResponse)
+          const started = await speaker.end()
+          if (!started) await speakResponse(jarvisResponse)
+          return
+        }
+        setState(STATES.idle)
+        setVoiceState('idle')
+        return
+      }
+    } catch {
+      // fall through
+    }
+
+    if (/\b(help|what can (?:i|you) say|voice commands)\b/i.test(text)) {
+      setResponse(VOICE_COMMAND_HELP)
+      setState(STATES.speaking)
+      setVoiceState('speaking')
+      await playSpeech(VOICE_COMMAND_HELP, {
+        preferBrowser: true,
+        browserOnly: true,
+        lang: 'en-US',
+        rate: 1.05,
+        voiceMatchers: AMERICAN_VOICE_MATCHERS,
+      })
+      setState(STATES.idle)
+      setVoiceState('idle')
+      return
+    }
+
+    // Live word-by-word speak while the LLM streams (browser TTS — lowest latency)
+    const speaker = createStreamingSpeaker({
+      lang: 'en-US',
+      rate: 1.08,
+      pitch: 1,
+      voiceMatchers: AMERICAN_VOICE_MATCHERS,
+      onStart: () => {
+        setState(STATES.speaking)
+        setVoiceState('speaking')
+      },
+      onEnd: () => {
+        setState(STATES.idle)
+        setVoiceState('idle')
+      },
+    })
+
+    let jarvisResponse = ''
+    try {
+      jarvisResponse = await sendChat(text, {
+        onToken: (delta) => {
+          void speaker.push(delta)
+        },
+      })
+      setResponse(jarvisResponse)
+    } catch (e) {
+      speaker.cancel()
+      setError(String(e.message || e).slice(0, 80))
+      setState(STATES.idle)
+      setVoiceState('idle')
+      return
+    }
+
+    const started = await speaker.end()
+    if (!started) {
+      // Fallback: full utterance if streaming produced nothing
+      setState(STATES.speaking)
+      setVoiceState('speaking')
+      await speakResponse(jarvisResponse)
+    }
   }
 
   const speakResponse = async (text) => {
     if (!text) { setState(STATES.idle); return }
     const started = await playSpeech(text, {
-      preferBrowser: !useBackend,
+      preferBrowser: true,
       preferBackend: useBackend,
       backendMaxChars: DEFAULT_SPEECH_MAX_CHARS,
       browserMaxChars: DEFAULT_SPEECH_MAX_CHARS,
       browserChunkSize: DEFAULT_SPEECH_CHUNK_CHARS,
       lang: 'en-US',
-      rate: 0.98,
+      rate: 1.05,
       pitch: 1,
       volume: 1,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,
@@ -169,7 +299,7 @@ export default function VoicePanel() {
 
   const readEverythingNow = async () => {
     try {
-      const res = await fetch(`${API}/brief/voice`)
+      const res = await fetch(`${api()}/brief/voice`)
       const data = await res.json()
       const text = data.text || 'JARVIS briefing system offline.'
       setResponse(text)
@@ -233,10 +363,29 @@ export default function VoicePanel() {
           ))}
         </div>
 
-        {/* Main action button */}
+        {/* Main action button — hold-to-speak (mouse + Space) */}
         <button
           className="btn"
-          onClick={cfg.action || undefined}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            if (state === STATES.idle) startRecording()
+          }}
+          onMouseUp={() => {
+            if (state === STATES.recording) stopRecording()
+          }}
+          onMouseLeave={() => {
+            if (state === STATES.recording) stopRecording()
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            if (state === STATES.idle) startRecording()
+          }}
+          onTouchEnd={() => {
+            if (state === STATES.recording) stopRecording()
+          }}
+          onClick={() => {
+            if (state === STATES.speaking) stopSpeaking()
+          }}
           disabled={state === STATES.processing}
           style={{
             fontSize: '13px',
@@ -251,6 +400,9 @@ export default function VoicePanel() {
         >
           {cfg.btnLabel}
         </button>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)', marginTop: 10 }}>
+          Hold button or Space · release to send · reply speaks word-by-word as it streams
+        </div>
       </div>
 
       {/* Transcript */}
@@ -330,7 +482,7 @@ export default function VoicePanel() {
         paddingTop: '10px',
       }}>
         STT: Browser Web Speech API → Whisper fallback<br />
-        TTS: Coqui/pyttsx3 backend → Browser SpeechSynthesis<br />
+          TTS: Coqui/pyttsx3 backend (slow) · live replies use browser word-stream<br />
         All processing local-first
       </div>
     </div>

@@ -1,6 +1,7 @@
-import { API_BASE } from './api'
+import { resolveApiBase, withAuth } from './api'
 
-const API = API_BASE
+const api = () => resolveApiBase()
+
 
 let activeAudio = null
 let activeUrl = null
@@ -358,6 +359,167 @@ export function stopSpeechPlayback() {
   beginPlaybackSession()
 }
 
+/**
+ * Low-latency streaming TTS: speaks each completed word via browser
+ * SpeechSynthesis as LLM tokens arrive (no wait for full reply).
+ */
+export function createStreamingSpeaker(options = {}) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return {
+      push: async () => {},
+      end: async () => {
+        options.onEnd?.()
+        return false
+      },
+      cancel: () => {},
+      get active() {
+        return false
+      },
+    }
+  }
+
+  const token = beginPlaybackSession()
+  let preferred = null
+  let rawBuf = ''
+  let spokenWordCount = 0
+  let ended = false
+  let started = false
+  let pending = 0
+  let idleWaiters = []
+  let keepAlive = null
+  let actionsHit = false
+
+  const notifyIdle = () => {
+    if (pending > 0) return
+    const waiters = idleWaiters
+    idleWaiters = []
+    waiters.forEach((resolve) => resolve())
+    if (ended && token === speechToken) options.onEnd?.()
+  }
+
+  const waitIdle = () =>
+    new Promise((resolve) => {
+      if (pending === 0) {
+        resolve()
+        return
+      }
+      idleWaiters.push(resolve)
+    })
+
+  const ensureVoice = async () => {
+    if (preferred || token !== speechToken) return preferred
+    const voices = await waitForVoices(180)
+    if (token !== speechToken) return null
+    preferred = pickVoiceCached(voices, options.voiceMatchers || AMERICAN_VOICE_MATCHERS)
+    return preferred
+  }
+
+  // Warm voice list immediately so the first word isn't delayed
+  const voiceReady = ensureVoice()
+
+  const enqueueUtterance = (phrase) => {
+    const text = String(phrase || '').trim()
+    if (!text || token !== speechToken) return
+
+    if (!started) {
+      started = true
+      options.onStart?.()
+      keepAlive = setInterval(() => {
+        if (token !== speechToken) return
+        try {
+          window.speechSynthesis.resume()
+        } catch {}
+      }, 2500)
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = options.lang ?? preferred?.lang ?? 'en-US'
+    utterance.rate = options.rate ?? 1.08
+    utterance.pitch = options.pitch ?? 1
+    utterance.volume = options.volume ?? 1
+    if (preferred) utterance.voice = preferred
+
+    pending += 1
+    utterance.onend = () => {
+      pending = Math.max(0, pending - 1)
+      notifyIdle()
+    }
+    utterance.onerror = () => {
+      pending = Math.max(0, pending - 1)
+      notifyIdle()
+    }
+
+    try {
+      window.speechSynthesis.resume()
+    } catch {}
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const cleanedSpeechText = () => {
+    let text = rawBuf
+    const act = text.search(/\n?ACTIONS:\s*/i)
+    if (act >= 0) {
+      text = text.slice(0, act)
+      actionsHit = true
+    }
+    return text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/```[\s\S]*$/g, ' ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[#>*_~]+/g, ' ')
+      .replace(/\s+/g, ' ')
+  }
+
+  const flushNewWords = (force = false) => {
+    if (token !== speechToken) return
+    const cleaned = cleanedSpeechText()
+    if (!cleaned.trim()) return
+
+    const words = cleaned.trim().split(/\s+/).filter(Boolean)
+    const beforeActions = rawBuf.split(/\n?ACTIONS:\s*/i)[0] || ''
+    const sourceEndsWithSpace = /\s$/.test(beforeActions)
+    const completeCount =
+      force || actionsHit || sourceEndsWithSpace ? words.length : Math.max(0, words.length - 1)
+
+    const cap = options.maxWords ?? 900
+    while (spokenWordCount < completeCount && spokenWordCount < cap) {
+      enqueueUtterance(words[spokenWordCount])
+      spokenWordCount += 1
+    }
+  }
+
+  return {
+    get active() {
+      return token === speechToken
+    },
+    push: async (delta) => {
+      if (token !== speechToken || !delta || actionsHit) return
+      await voiceReady
+      if (token !== speechToken) return
+      rawBuf += delta
+      flushNewWords(false)
+    },
+    end: async () => {
+      if (token !== speechToken) {
+        if (keepAlive) clearInterval(keepAlive)
+        return false
+      }
+      ended = true
+      flushNewWords(true)
+      await waitIdle()
+      if (keepAlive) clearInterval(keepAlive)
+      keepAlive = null
+      return started && token === speechToken
+    },
+    cancel: () => {
+      if (keepAlive) clearInterval(keepAlive)
+      keepAlive = null
+      beginPlaybackSession()
+    },
+  }
+}
+
 async function speakWithBackend(text, options = {}, token = speechToken) {
   if (token !== speechToken) return false
 
@@ -369,12 +531,15 @@ async function speakWithBackend(text, options = {}, token = speechToken) {
   }
 
   try {
-    const res = await fetch(`${API}/voice/output`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text.slice(0, options.backendMaxChars ?? DEFAULT_SPEECH_MAX_CHARS) }),
-      signal: controller.signal,
-    })
+    const res = await fetch(
+      `${api()}/voice/output`,
+      withAuth({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.slice(0, options.backendMaxChars ?? DEFAULT_SPEECH_MAX_CHARS) }),
+        signal: controller.signal,
+      }),
+    )
 
     if (token !== speechToken || activeBackendController !== controller) {
       releaseController()

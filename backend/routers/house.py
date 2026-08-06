@@ -34,15 +34,15 @@ def _tier_for(domain: str) -> int:
 
 @router.get("/status")
 async def house_status():
-    sim = SimulatedHouse()
-    ha = HomeAssistantAdapter()
     return {
-        "backend_default": get_adapter().name,
-        "sim_entities": len(sim.list_entities()),
-        "ha_configured": ha_configured(),
-        "ha_writes_enabled": writes_enabled(),
-        "ha_entities": len(ha.list_entities()) if ha_configured() else 0,
-        "pending_actions": len(action_queue.list_pending()),
+        "disabled": True,
+        "message": "Home automation is parked for now",
+        "backend_default": "disabled",
+        "sim_entities": 0,
+        "ha_configured": False,
+        "ha_writes_enabled": False,
+        "ha_entities": 0,
+        "pending_actions": 0,
     }
 
 

@@ -1,15 +1,16 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech } from '../lib/speech'
+import { AMERICAN_VOICE_MATCHERS, createStreamingSpeaker } from '../lib/speech'
 import { formatIstTime } from '../lib/time'
+import { resolveApiBase } from '../lib/api'
 
 const QUICK_PROMPTS = [
   'What should I focus on today?',
+  'Research Fourier neural operators and generate a report',
+  'Search the web for latest open-source text-to-SQL benchmarks',
   'Summarize my GitHub projects',
-  "What's trending in AI today?",
-  'How can I improve LexProbe?',
-  'Give me a code review checklist',
+  'Build me a website for a coastal linen shop',
 ]
 
 const CODING_ACTION_HINTS = [
@@ -295,6 +296,45 @@ function ChatBubble({ msg, onSave }) {
                 {a.label}
               </button>
             ))}
+            {msg.demo?.id ? (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: '10px' }}
+                  onClick={() => useJarvisStore.getState().openDemo(msg.demo.id)}
+                >
+                  OPEN PREVIEW
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: '10px' }}
+                  onClick={() => useJarvisStore.getState().openDemo(msg.demo.id)}
+                >
+                  EDIT
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: '10px' }}
+                  onClick={async () => {
+                    useJarvisStore.getState().openDemo(msg.demo.id)
+                    try {
+                      const base = resolveApiBase()
+                      const res = await fetch(`${base}/demos/${msg.demo.id}/publish`, { method: 'POST' })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.detail || 'publish failed')
+                      useJarvisStore.getState().setStatusMsg(`PUBLIC — ${data.public_url}`)
+                    } catch (e) {
+                      useJarvisStore.getState().setStatusMsg(`PUBLISH FAILED — ${String(e.message || e).slice(0, 40)}`)
+                    }
+                  }}
+                >
+                  PUBLISH
+                </button>
+              </>
+            ) : null}
           </div>
         )}
       </div>
@@ -345,30 +385,44 @@ export default function ChatPanel() {
 
     setInput('')
     setThinking(true)
-    const response = await sendChat(msg)
-    setThinking(false)
 
-    if (shouldSkipAutoSpeak(msg, response)) return
-    speakResponse(response)
-  }
+    // Skip live TTS for coding prompts; otherwise speak each word as tokens arrive
+    const liveSpeak = !promptLooksCoding(msg)
+    let speaker = null
+    if (liveSpeak) {
+      speaker = createStreamingSpeaker({
+        preferBrowser: true,
+        lang: 'en-US',
+        rate: 1.08,
+        pitch: 1,
+        voiceMatchers: AMERICAN_VOICE_MATCHERS,
+        onStart: () => setVoiceState('speaking'),
+        onEnd: () => setVoiceState('idle'),
+      })
+    }
 
-  const speakResponse = async (text) => {
-    if (!text) return
+    let response = ''
+    try {
+      response = await sendChat(msg, {
+        onToken: liveSpeak
+          ? (delta) => {
+              void speaker?.push(delta)
+            }
+          : undefined,
+      })
+    } finally {
+      setThinking(false)
+    }
 
-    setVoiceState('speaking')
-    const started = await playSpeech(text, {
-      preferBrowser: true,
-      preferBackend: true,
-      backendMaxChars: DEFAULT_SPEECH_MAX_CHARS,
-      browserMaxChars: DEFAULT_SPEECH_MAX_CHARS,
-      browserChunkSize: DEFAULT_SPEECH_CHUNK_CHARS,
-      lang: 'en-US',
-      rate: 0.98,
-      pitch: 1,
-      voiceMatchers: AMERICAN_VOICE_MATCHERS,
-      onEnd: () => setVoiceState('idle'),
-    })
+    if (!liveSpeak) return
 
+    if (shouldSkipAutoSpeak(msg, response)) {
+      speaker?.cancel()
+      setVoiceState('idle')
+      return
+    }
+
+    const started = await speaker?.end()
     if (!started) setVoiceState('idle')
   }
 
@@ -399,22 +453,22 @@ export default function ChatPanel() {
         </div>
       </div>
 
-      <div ref={scrollRef} className="scroll-area" style={{ flex: 1, padding: '16px', minHeight: 0 }}>
+      <div ref={scrollRef} className="scroll-area" style={{ flex: 1, padding: '18px', minHeight: 0 }}>
         {chatHistory.length === 0 && (
           <div
             style={{
               textAlign: 'center',
-              padding: '34px 22px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
+              padding: '40px 24px',
+              fontFamily: 'var(--font-body)',
+              fontSize: '15px',
               color: 'var(--text-dim)',
-              lineHeight: 2,
+              lineHeight: 1.7,
             }}
           >
-            <div style={{ fontSize: '22px', marginBottom: '12px' }}>[ ]</div>
-            JARVIS AWAITING INPUT
-            <br />
-            <span style={{ fontSize: '10px', opacity: 0.65 }}>context and rag active</span>
+            <div className="left-panel-title" style={{ marginBottom: 10 }}>
+              Chat
+            </div>
+            Ask anything — context and vault RAG are active when available.
           </div>
         )}
 
@@ -424,28 +478,28 @@ export default function ChatPanel() {
         {thinking && <ThinkingIndicator />}
       </div>
 
-      <div style={{ padding: '14px 16px', borderTop: '1px solid rgba(0,200,255,0.08)' }}>
+      <div style={{ padding: '16px 18px', borderTop: '1px solid rgba(255,170,80,0.12)' }}>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
           <textarea
             className="input-cyber"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKey}
-            placeholder="Query JARVIS..."
+            placeholder="Message JARVIS…"
             rows={3}
-            style={{ resize: 'none', flex: 1, fontSize: '14px', lineHeight: 1.55 }}
+            style={{ resize: 'none', flex: 1, fontFamily: 'var(--font-body)', fontSize: 15, lineHeight: 1.5 }}
           />
           <button
             className="btn"
             onClick={handleSend}
             disabled={thinking || !input.trim()}
-            style={{ padding: '10px 16px', height: '64px', opacity: thinking ? 0.5 : 1 }}
+            style={{ padding: '10px 16px', height: '64px', opacity: thinking ? 0.5 : 1, fontSize: 13 }}
           >
-            SEND
+            Send
           </button>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', marginTop: '7px', lineHeight: 1.6 }}>
-          ENTER to send | SHIFT+ENTER for newline | auto-speak for general chat only | large code outputs can be downloaded
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.55 }}>
+          Enter to send · Shift+Enter for newline · reply streams aloud when enabled
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useJarvisStore } from '../app/store'
-import { API_BASE } from '../lib/api'
+import { resolveApiBase } from '../lib/api'
 
 const TABS = [
   { id: 'capture', label: 'CAPTURE' },

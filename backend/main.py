@@ -9,19 +9,31 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import brief, calendar, chat, context, graph, gestures, house, ingest, media, vault, vision, voice
+from routers import brief, calendar, chat, context, demos, graph, gestures, house, ingest, media, research, vault, vision, voice
 from services import config
 from services.auth import JarvisAuthMiddleware
+from services import demo_builder as demo_builder_svc
 
 app = FastAPI(title="JARVIS AI Brain", version="2.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=config.cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors = config.cors_origins()
+if _cors == ["*"]:
+    # PUBLIC_MODE / tunnel / LAN — cannot combine allow_origins=["*"] with credentials
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r".*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.add_middleware(JarvisAuthMiddleware)
 
 app.include_router(context.router, prefix="/context", tags=["context"])
@@ -36,10 +48,28 @@ app.include_router(graph.router, prefix="/graph", tags=["graph"])
 app.include_router(gestures.router, prefix="/gestures", tags=["gestures"])
 app.include_router(house.router, prefix="/house", tags=["house"])
 app.include_router(vision.router, prefix="/vision", tags=["vision"])
+app.include_router(demos.router, prefix="/demos", tags=["demos"])
+app.include_router(research.router, prefix="/research", tags=["research"])
 
 generated_root = Path(__file__).parent / "data" / "generated"
 generated_root.mkdir(parents=True, exist_ok=True)
 app.mount("/generated", StaticFiles(directory=str(generated_root)), name="generated")
+
+demos_root = demo_builder_svc.demos_root()
+app.mount("/demos-static", StaticFiles(directory=str(demos_root), html=True), name="demos-static")
+
+
+@app.on_event("startup")
+async def _warm_hot_path() -> None:
+    """Preload vault/knowledge caches so the first chat isn't a cold stutter."""
+    try:
+        from services import rag, vault
+
+        vault.vault_status()
+        rag.load_local_store()
+        print(f"[startup] knowledge docs cached: {len(rag.load_local_store())}")
+    except Exception as exc:
+        print(f"[startup] warm failed: {exc}")
 
 
 @app.get("/")
@@ -62,6 +92,9 @@ def root():
             "/gestures",
             "/house",
             "/vision",
+            "/demos",
+            "/research",
+            "/demos-static",
             "/generated",
         ],
     }

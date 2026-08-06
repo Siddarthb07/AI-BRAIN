@@ -7,12 +7,13 @@ export default function AppShell({ children, sidebar, rightPanel, miniMap }) {
         {sidebar ? (
           <aside
             style={{
-              width: 220,
+              width: 268,
               flexShrink: 0,
-              borderRight: '1px solid rgba(0,200,255,0.12)',
+              borderRight: '1px solid rgba(255,170,80,0.12)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              background: 'rgba(12, 10, 18, 0.55)',
             }}
           >
             {sidebar}

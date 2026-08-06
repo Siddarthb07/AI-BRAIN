@@ -8,7 +8,8 @@
 
 import { useEffect, useRef } from 'react'
 import { useJarvisStore } from '../app/store'
-import { API_BASE } from '../lib/api'
+import { resolveApiBase } from '../lib/api'
+
 import { requestGestureCamera, streamHasLiveVideo } from '../lib/gestures'
 import {
   CUSTOM_CONTROL_GESTURES,
@@ -161,7 +162,7 @@ function mir(x) {
 
 async function postEvent(payload) {
   try {
-    await fetch(`${API_BASE}/gestures/event`, {
+    await fetch(`${resolveApiBase()}/gestures/event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

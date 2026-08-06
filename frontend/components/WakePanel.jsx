@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { useJarvisStore } from '../app/store'
-import { AMERICAN_VOICE_MATCHERS, clipForSpeech, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
-import { API_BASE } from '../lib/api'
+import { AMERICAN_VOICE_MATCHERS, clipForSpeech, createStreamingSpeaker, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
+import { resolveApiBase } from '../lib/api'
+import { routeVoiceCommand } from '../lib/voiceCommands'
 
 const WAKE_RE = /\bjarvis\b/i
 const KEEP_RE =
@@ -259,8 +260,28 @@ export function WakeRuntime() {
         setWakeStatus('processing')
         setVoiceState('processing')
         try {
-          const reply = await sendChat(after)
-          await speak(reply || 'Done.')
+          const speaker = createStreamingSpeaker({
+            lang: 'en-US',
+            rate: 1.08,
+            voiceMatchers: AMERICAN_VOICE_MATCHERS,
+            onStart: () => {
+              speakingRef.current = true
+              setWakeStatus('speaking')
+              setVoiceState('speaking')
+              armMute(350)
+            },
+            onEnd: () => {
+              speakingRef.current = false
+              setVoiceState('idle')
+            },
+          })
+          await sendChat(after, {
+            onToken: (delta) => {
+              void speaker.push(delta)
+            },
+          })
+          const ok = await speaker.end()
+          if (!ok) await speak('Done.')
         } catch {
           await speak('I hit a problem answering that.')
         } finally {
@@ -321,23 +342,13 @@ export function WakeRuntime() {
       if (!shouldAnswer || !question) return
       if (isNoiseOrIdle(question, { keepListening: keepRef.current, hasWake: false })) return
 
+      // UI / system voice commands before free-form chat
       processingRef.current = true
-      if (!keepRef.current) {
-        armedRef.current = false
-        armUntilRef.current = 0
-      }
       setWakeStatus('processing')
       setVoiceState('processing')
-      setStatusMsg(`THINKING → ${question.slice(0, 36)}…`)
-      try {
-        const reply = await sendChat(question)
-        setStatusMsg('ANSWER READY — SPEAKING')
-        await speak(reply || 'Done.')
-      } catch {
-        await speak('I hit a problem answering that.')
-      } finally {
+
+      const finishListen = () => {
         processingRef.current = false
-        // Stay in continuous mode after every answer
         if (keepRef.current) {
           armedRef.current = true
           armUntilRef.current = 0
@@ -347,6 +358,77 @@ export function WakeRuntime() {
           setWakeStatus(isArmed() ? 'listening_command' : 'listening_wake')
         }
         setVoiceState('idle')
+      }
+
+      try {
+        const routed = await routeVoiceCommand(question, () => useJarvisStore.getState())
+        if (routed.handled) {
+          if (routed.speak) await speak(routed.speak)
+          if (routed.streamChat && routed.chat) {
+            setStatusMsg(`THINKING → ${routed.chat.slice(0, 36)}…`)
+            const speaker = createStreamingSpeaker({
+              lang: 'en-US',
+              rate: 1.08,
+              voiceMatchers: AMERICAN_VOICE_MATCHERS,
+              onStart: () => {
+                speakingRef.current = true
+                setWakeStatus('speaking')
+                setVoiceState('speaking')
+                armMute(350)
+              },
+              onEnd: () => {
+                speakingRef.current = false
+                setVoiceState('idle')
+              },
+            })
+            await sendChat(routed.chat, {
+              onToken: (delta) => {
+                void speaker.push(delta)
+              },
+            })
+            const ok = await speaker.end()
+            if (!ok) await speak('Done.')
+          }
+          finishListen()
+          return
+        }
+      } catch {
+        // fall through to chat
+      }
+
+      if (!keepRef.current) {
+        armedRef.current = false
+        armUntilRef.current = 0
+      }
+      setStatusMsg(`THINKING → ${question.slice(0, 36)}…`)
+      try {
+        const speaker = createStreamingSpeaker({
+          lang: 'en-US',
+          rate: 1.08,
+          voiceMatchers: AMERICAN_VOICE_MATCHERS,
+          onStart: () => {
+            speakingRef.current = true
+            setWakeStatus('speaking')
+            setVoiceState('speaking')
+            setStatusMsg('SPEAKING · live')
+            armMute(350)
+          },
+          onEnd: () => {
+            speakingRef.current = false
+            setVoiceState('idle')
+          },
+        })
+        await sendChat(question, {
+          onToken: (delta) => {
+            void speaker.push(delta)
+          },
+        })
+        const ok = await speaker.end()
+        if (!ok) await speak('Done.')
+      } catch {
+        await speak('I hit a problem answering that.')
+      } finally {
+        finishListen()
       }
     },
     [sendChat, runVoiceVisionCapture, setKeepListening, setStatusMsg, setVoiceState, setWakeStatus, speak],

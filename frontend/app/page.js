@@ -10,13 +10,14 @@ import VaultPanel from '../components/vault/VaultPanel'
 import CalendarPanel from '../components/CalendarPanel'
 import VoicePanel from '../components/VoicePanel'
 import StudioPanel from '../components/StudioPanel'
+import DemoPanel from '../components/DemoPanel'
 import LocalIngestPanel from '../components/LocalIngestPanel'
 import NodePanel from '../components/NodePanel'
 import DashboardPanel from '../components/DashboardPanel'
-import HousePanel from '../components/HousePanel'
 import VisionPanel from '../components/VisionPanel'
 import WakePanel, { WakeRuntime } from '../components/WakePanel'
 import GestureRuntime from '../components/GestureRuntime'
+import GlobalVoicePTT from '../components/GlobalVoicePTT'
 import VisionCaptureRuntime from '../components/VisionCaptureRuntime'
 
 const BrainGraph = lazy(() => import('../components/BrainGraph'))
@@ -33,10 +34,10 @@ const WORK_RAIL = [
   { id: 'vault', label: 'Vault' },
   { id: 'calendar', label: 'Cal' },
   { id: 'voice', label: 'Voice' },
-  { id: 'house', label: 'House' },
 ]
 
 const LAB_RAIL = [
+  { id: 'demos', label: 'Demos' },
   { id: 'studio', label: 'Studio' },
   { id: 'ingest', label: 'Ingest' },
   { id: 'graph', label: 'Graph' },
@@ -52,44 +53,24 @@ function ThreadSidebar() {
   const createChatSession = useJarvisStore((s) => s.createChatSession)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '10px' }}>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        THREADS
+    <div className="left-panel">
+      <div className="left-panel-title">Threads</div>
+      <div className="left-panel-meta">
+        {chatSessions.length} sessions · {chatHistory.length} messages
       </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-dim)', marginBottom: 8 }}>
-        {chatSessions.length} sessions · {chatHistory.length} msgs
-      </div>
-      <button
-        type="button"
-        className="btn btn-gold"
-        style={{ fontSize: '10px', marginBottom: '6px' }}
-        onClick={() => createChatSession('New chat')}
-      >
-        + NEW
+      <button type="button" className="btn btn-gold" style={{ fontSize: 12, marginBottom: 8 }} onClick={() => createChatSession('New chat')}>
+        New chat
       </button>
-      <button type="button" className="btn" style={{ fontSize: '10px', marginBottom: '10px' }} onClick={() => loadChatSession()}>
-        ↺ REFRESH
+      <button type="button" className="btn" style={{ fontSize: 12, marginBottom: 14 }} onClick={() => loadChatSession()}>
+        Refresh
       </button>
       <div className="scroll-area" style={{ flex: 1, minHeight: 0 }}>
         {(chatSessions.length ? chatSessions : [{ id: sessionId, title: 'Current' }]).map((s) => (
           <button
             key={s.id || 'current'}
             type="button"
+            className={`left-list-btn${s.id === sessionId ? ' is-active' : ''}`}
             onClick={() => s.id && loadChatSession(s.id)}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: '8px',
-              marginBottom: '4px',
-              borderRadius: '4px',
-              border: 'none',
-              cursor: 'pointer',
-              background: s.id === sessionId ? 'rgba(0,200,255,0.12)' : 'transparent',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              color: s.id === sessionId ? 'var(--cyan)' : 'var(--text-secondary)',
-            }}
           >
             {s.title || 'Chat'}
           </button>
@@ -101,36 +82,13 @@ function ThreadSidebar() {
 
 function IconRail({ items, active, onSelect }) {
   return (
-    <div
-      style={{
-        width: 56,
-        flexShrink: 0,
-        borderRight: '1px solid rgba(0,200,255,0.1)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        paddingTop: '8px',
-        gap: '4px',
-        background: 'rgba(0,4,8,0.6)',
-      }}
-    >
+    <div className="icon-rail">
       {items.map((tab) => (
         <button
           key={tab.id}
           type="button"
+          className={`icon-rail-btn${active === tab.id ? ' is-active' : ''}`}
           onClick={() => onSelect(tab.id)}
-          style={{
-            width: 44,
-            padding: '8px 4px',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            background: active === tab.id ? 'rgba(0,200,255,0.12)' : 'transparent',
-            color: active === tab.id ? 'var(--cyan)' : 'var(--text-dim)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '8px',
-            letterSpacing: '0.06em',
-          }}
         >
           {tab.label}
         </button>
@@ -199,7 +157,6 @@ export default function Page() {
   const loadChatSession = useJarvisStore((s) => s.loadChatSession)
   const fetchVaultNotes = useJarvisStore((s) => s.fetchVaultNotes)
   const fetchVaultStatus = useJarvisStore((s) => s.fetchVaultStatus)
-  const fetchHouseStatus = useJarvisStore((s) => s.fetchHouseStatus)
   const fetchGraph = useJarvisStore((s) => s.fetchGraph)
   const fetchContext = useJarvisStore((s) => s.fetchContext)
 
@@ -217,7 +174,6 @@ export default function Page() {
     fetchExternal()
     fetchGoogleCalendarStatus({ silent: true })
     pollIngestStatus()
-    fetchHouseStatus()
     fetchGraph()
     fetchContext()
     const t1 = setInterval(pollIngestStatus, 15000)
@@ -233,7 +189,6 @@ export default function Page() {
     fetchExternal,
     fetchGoogleCalendarStatus,
     fetchGraph,
-    fetchHouseStatus,
     fetchVaultNotes,
     fetchVaultStatus,
     loadChatSession,
@@ -246,13 +201,13 @@ export default function Page() {
       setLayoutMode('dashboard')
     } else if (id === 'work') {
       setLayoutMode('work')
-      if (!['chat', 'brief', 'vault', 'calendar', 'voice', 'house'].includes(activePanel)) {
+      if (!['chat', 'brief', 'vault', 'calendar', 'voice'].includes(activePanel)) {
         setActivePanel('chat')
       }
     } else if (id === 'lab') {
       setLayoutMode('lab')
-      if (!['studio', 'ingest', 'graph', 'vision', 'wake'].includes(activePanel)) {
-        setActivePanel('studio')
+      if (!['demos', 'studio', 'ingest', 'graph', 'vision', 'wake'].includes(activePanel)) {
+        setActivePanel('demos')
       }
     }
   }
@@ -279,8 +234,6 @@ export default function Page() {
         return <CalendarPanel />
       case 'voice':
         return <VoicePanel />
-      case 'house':
-        return <HousePanel />
       case 'chat':
       default:
         return <ChatPanel />
@@ -302,8 +255,10 @@ export default function Page() {
       case 'wake':
         return <WakePanel />
       case 'studio':
-      default:
         return <StudioPanel />
+      case 'demos':
+      default:
+        return <DemoPanel />
     }
   }
 
@@ -323,6 +278,7 @@ export default function Page() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-void)', overflow: 'hidden' }}>
       <WakeRuntime />
       <GestureRuntime />
+      <GlobalVoicePTT />
       <VisionCaptureRuntime />
       <HUD />
       {healthState.demo_mode ? (

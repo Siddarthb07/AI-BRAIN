@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 VAULT_SUBROOT = "JARVIS"
-FOLDERS = ("Chat", "Briefs", "Generated", "Inbox", "Projects", "Logs")
+FOLDERS = ("Chat", "Briefs", "Generated", "Inbox", "Projects", "Logs", "Demos", "Reports")
 
 _SKIP_DIRS = {".obsidian", ".git", ".trash", "node_modules", "__pycache__"}
 
@@ -219,6 +219,9 @@ def extract_code_artifacts(content: str) -> list[dict[str, str]]:
             "ts": "ts",
             "tsx": "tsx",
             "jsx": "jsx",
+            "html": "html",
+            "css": "css",
+            "svg": "svg",
             "json": "json",
             "yaml": "yaml",
             "yml": "yaml",
@@ -230,3 +233,40 @@ def extract_code_artifacts(content: str) -> list[dict[str, str]]:
         ext = ext_map.get(lang, lang if len(lang) <= 4 else "txt")
         artifacts.append({"filename": f"artifact-{i + 1}.{ext}", "content": code, "language": lang})
     return artifacts
+
+
+def save_demo_tree(
+    slug: str,
+    files: list[dict[str, str]],
+    *,
+    title: str = "Demo",
+    kit: str = "",
+    brief: str = "",
+) -> dict[str, Any]:
+    """Mirror a generated demo into vault JARVIS/Demos/{slug}/."""
+    root = _vault_root()
+    dest_dir = root / VAULT_SUBROOT / "Demos" / _slug(slug)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for item in files:
+        rel = str(item.get("path") or "").replace("\\", "/").lstrip("/")
+        if not rel or ".." in Path(rel).parts:
+            continue
+        content = item.get("content") or ""
+        path = dest_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        written.append(rel)
+    readme = dest_dir / "README.md"
+    readme.write_text(
+        f"# {title}\n\nkit: `{kit}`\n\n## Brief\n\n{brief}\n\n## Files\n\n"
+        + "\n".join(f"- `{w}`" for w in written)
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "path": str(dest_dir),
+        "relative_path": str(dest_dir.relative_to(root)),
+        "files": written,
+        "title": title,
+    }

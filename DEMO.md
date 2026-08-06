@@ -1,23 +1,29 @@
-# 5-minute JARVIS demo (v2)
+# 5-minute JARVIS demo (v2 + Demo Builder)
 
-## Local URLs (this machine)
+## Local URLs (Docker)
 
-- **Frontend:** http://localhost:3000
-- **Backend:** http://localhost:8002
-- **API docs:** http://localhost:8002/docs
+- **Frontend:** http://localhost:5050
+- **Backend:** http://localhost:8001
+- **API docs:** http://localhost:8001/docs
 - **Qdrant:** http://localhost:6335/dashboard
 
-> Port 8001 was already taken by another local service, so JARVIS API uses **8002**. Frontend `.env.local` points at it.
+Native (optional): frontend `:3000`, backend `:8002`.
 
 ## Walkthrough
 
-1. Open **http://localhost:3000** — lands on **Dashboard** (brain stage + widgets).
-2. Glance Brief / House strip / Attention LEDs.
-3. On House strip, toggle **Lab Lights** → confirm the pending action.
-4. Switch to **Work → Chat**: `Remember the word ORBIT` then `What word?` (multi-turn + stream). Requires Ollama or `GROQ_API_KEY`.
-5. **Lab → Graph**: click a node → NodePanel → Ask JARVIS.
-6. **Lab → Vision / Wake**: stubs visible (camera off, wake opt-in off).
-7. API checks:
-   - `GET http://localhost:8002/health`
-   - `GET http://localhost:8002/graph`
-   - `GET http://localhost:8002/house/entities`
+1. Open **http://localhost:5050** — lands on **Dashboard** (brain stage + widgets). Wake is **opt-in** (Lab → Wake).
+2. Work → Chat: `Remember the word ORBIT` then `What word?` (multi-turn + SSE stream). Needs Ollama or `GROQ_API_KEY`.
+3. Click **+ NEW** in Threads, send a different message, switch back — sessions isolate.
+4. **Site builder beat:** Chat `build me a website for a coastal linen shop called Shore & Thread` → confirm if prompted → **OPEN PREVIEW / EDIT / PUBLISH**. Or Lab → **Demos** → BUILD.
+5. In Demos: Monaco edit `src/App.jsx` → SAVE → REBUILD → iframe updates. Optional **PUBLISH** (needs `cloudflared`).
+6. Lab → Graph: click a node → NodePanel → Ask JARVIS. Demos appear on the graph; House layer is off.
+7. **Research:** Chat `Research … and generate a report` → Groq Compound web search → vault `JARVIS/Reports/`.
+8. Lab → Vision / Wake: camera capture (Groq Qwen vision), wake opt-in.
+9. API checks:
+   - `GET http://localhost:8001/health`
+   - `GET http://localhost:8001/graph`
+   - `GET http://localhost:8001/house/status` → `disabled: true`
+   - `GET http://localhost:8001/demos`
+   - `POST http://localhost:8001/research/search` with `{"query":"…"}`
+
+House automation UI is parked — do not demo HA writes.

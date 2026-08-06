@@ -17,10 +17,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 def _vision_models() -> list[str]:
     """Models that accept multimodal content on this account.
 
-    Free/tier Groq keys often lack llama-4 scout; qwen/qwen3.6-27b currently
-    accepts image_url payloads (may 503 under load).
+    Prefer Qwen3.6 27B (text+image on Groq). Llama-4 scout as optional fallback.
     """
-    primary = (os.getenv("GROQ_VISION_MODEL") or "").strip()
+    primary = (os.getenv("GROQ_VISION_MODEL") or "qwen/qwen3.6-27b").strip()
     fallbacks = [
         m.strip()
         for m in (
@@ -39,6 +38,16 @@ def _vision_models() -> list[str]:
 def _data_url(image_bytes: bytes, mime: str = "image/jpeg") -> str:
     b64 = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{mime};base64,{b64}"
+
+
+def _strip_thinking(text: str) -> str:
+    """Qwen reasoning models may wrap chain-of-thought in <think>…</think>."""
+    if not text:
+        return text
+    import re
+
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.I).strip()
+    return cleaned or text.strip()
 
 
 async def analyze_image(
@@ -96,6 +105,7 @@ async def analyze_image(
                         )
                         if resp.status_code == 200:
                             text = resp.json()["choices"][0]["message"]["content"]
+                            text = _strip_thinking(text)
                             return {
                                 "analysis": text,
                                 "provider": "groq",
@@ -110,12 +120,47 @@ async def analyze_image(
                         if resp.status_code in (404,):
                             break
                         if resp.status_code in (429, 503):
-                            await asyncio.sleep(0.8 * (attempt + 1))
+                            await asyncio.sleep(1.5 * (attempt + 1))
                             continue
                         break
         except Exception as exc:
             last_err = str(exc)
             print(f"[Vision] Groq failed: {exc}")
+
+    # One more pass after cooldown if rate-limited
+    if key and last_err and "429" in str(last_err):
+        await asyncio.sleep(3.0)
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                for model in _vision_models():
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "messages": messages,
+                            "max_tokens": 512,
+                            "temperature": 0.3,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        text = _strip_thinking(resp.json()["choices"][0]["message"]["content"])
+                        return {
+                            "analysis": text,
+                            "provider": "groq",
+                            "model": model,
+                            "error": None,
+                        }
+                    last_err = f"{model} HTTP {resp.status_code}: {resp.text[:220]}"
+                    if resp.status_code == 429:
+                        await asyncio.sleep(2.0)
+                        continue
+                    break
+        except Exception as exc:
+            last_err = str(exc)
 
     # Honest fallback — do not pretend vision worked
     try:

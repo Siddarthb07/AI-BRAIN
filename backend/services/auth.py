@@ -37,7 +37,9 @@ class JarvisAuthMiddleware(BaseHTTPMiddleware):
         if path.startswith("/calendar/google/callback"):
             return await call_next(request)
 
-        if request.method in SAFE_METHODS and path.startswith(("/graph", "/house/entities", "/house/status", "/gestures")):
+        if request.method in SAFE_METHODS and path.startswith(
+            ("/graph", "/house/entities", "/house/status", "/gestures", "/demos", "/demos-static", "/research/status", "/vision/status")
+        ):
             return await call_next(request)
 
         auth = request.headers.get("Authorization") or ""

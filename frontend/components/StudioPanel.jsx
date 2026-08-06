@@ -9,9 +9,9 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { useJarvisStore } from '../app/store'
 
-import { API_BASE } from '../lib/api'
+import { resolveApiBase } from '../lib/api'
 
-const API = API_BASE
+const api = () => resolveApiBase()
 
 const SUB_TABS = [
   { id: 'image', label: 'IMAGE STUDIO' },
@@ -353,7 +353,7 @@ export default function StudioPanel() {
 
   const fetchImageStatus = async () => {
     try {
-      const res = await fetch(`${API}/media/image/status`)
+      const res = await fetch(`${api()}/media/image/status`)
       const data = await res.json()
       setImageStatus(data)
     } catch {
@@ -363,7 +363,7 @@ export default function StudioPanel() {
 
   const fetchImageHistory = async () => {
     try {
-      const res = await fetch(`${API}/media/image/history?limit=8`)
+      const res = await fetch(`${api()}/media/image/history?limit=8`)
       const data = await res.json()
       const items = data.items || []
       setHistory(items)
@@ -393,7 +393,7 @@ export default function StudioPanel() {
     setStatusMsg('GENERATING IMAGE...')
 
     try {
-      const res = await fetch(`${API}/media/image/generate`, {
+      const res = await fetch(`${api()}/media/image/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

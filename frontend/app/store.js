@@ -2,10 +2,13 @@
 import { create } from 'zustand'
 import { formatIstBriefLabel } from '../lib/time'
 
-import { API_BASE } from '../lib/api'
+import { resolveApiBase, withAuth } from '../lib/api'
 import { requestGestureCamera } from '../lib/gestures'
 
-const API = API_BASE
+/** Always resolve at call time so Docker (localhost:8001) vs tunnel (/backend) both work. */
+const api = () => resolveApiBase()
+const jfetch = (url, init) => fetch(url, withAuth(init || {}))
+
 
 const DEFAULT_GOOGLE_CALENDAR = {
   configured: false,
@@ -63,6 +66,7 @@ export const useJarvisStore = create((set, get) => ({
   graphSpinEnabled: true,
   statusMsg: 'JARVIS ONLINE',
   activePanel: 'chat',
+  activeDemoId: null,
   layoutMode: 'work',
   shellMode: 'dashboard',
   graphData: null,
@@ -211,6 +215,14 @@ export const useJarvisStore = create((set, get) => ({
     return get().enableGestures()
   },
   setActivePanel: (activePanel) => set({ activePanel }),
+  setActiveDemoId: (activeDemoId) => set({ activeDemoId }),
+  openDemo: (demoId) =>
+    set({
+      activeDemoId: demoId || null,
+      activePanel: 'demos',
+      shellMode: 'lab',
+      layoutMode: 'lab',
+    }),
   setLayoutMode: (layoutMode) => set({ layoutMode }),
   setShellMode: (shellMode) => set({ shellMode }),
   setStatusMsg: (statusMsg) => set({ statusMsg }),
@@ -225,7 +237,7 @@ export const useJarvisStore = create((set, get) => ({
 
   checkBackendHealth: async ({ silent = true, repairStatus = false } = {}) => {
     try {
-      const res = await fetch(`${API}/health`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/health`, { cache: 'no-store' })
       if (!res.ok) throw new Error('health failed')
       const data = await res.json()
 
@@ -258,7 +270,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchContext: async () => {
     try {
-      const res = await fetch(`${API}/context`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/context`, { cache: 'no-store' })
       if (!res.ok) return null
       const data = await res.json()
       const ctx = data.context || data
@@ -285,7 +297,7 @@ export const useJarvisStore = create((set, get) => ({
     try {
       const body = { active_project: project }
       if (Array.isArray(dailyGoals) && dailyGoals.length) body.daily_goals = dailyGoals
-      const res = await fetch(`${API}/context`, {
+      const res = await jfetch(`${api()}/context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -316,7 +328,7 @@ export const useJarvisStore = create((set, get) => ({
       const form = new FormData()
       form.append('file', blob, 'capture.jpg')
       if (prompt) form.append('prompt', prompt)
-      const res = await fetch(`${API}/vision/analyze`, { method: 'POST', body: form })
+      const res = await jfetch(`${api()}/vision/analyze`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`vision ${res.status}`)
       return await res.json()
     } catch (e) {
@@ -327,7 +339,7 @@ export const useJarvisStore = create((set, get) => ({
   loadChatSession: async (sessionId) => {
     try {
       if (sessionId) {
-        const res = await fetch(`${API}/chat/sessions/${sessionId}`, { cache: 'no-store' })
+        const res = await jfetch(`${api()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
         if (!res.ok) {
           set({ statusMsg: `CHAT LOAD FAILED (${res.status})` })
           return
@@ -340,7 +352,7 @@ export const useJarvisStore = create((set, get) => ({
           citations: m.meta?.citations,
           actions: m.meta?.actions,
         }))
-        const sessionsRes = await fetch(`${API}/chat/sessions`, { cache: 'no-store' })
+        const sessionsRes = await jfetch(`${api()}/chat/sessions`, { cache: 'no-store' })
         const sessionsData = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] }
         set({
           sessionId,
@@ -350,7 +362,7 @@ export const useJarvisStore = create((set, get) => ({
         })
         return
       }
-      const res = await fetch(`${API}/chat/history`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/chat/history`, { cache: 'no-store' })
       if (!res.ok) {
         set({ statusMsg: `CHAT HISTORY FAILED (${res.status})` })
         return
@@ -376,7 +388,7 @@ export const useJarvisStore = create((set, get) => ({
 
   refreshChatSessions: async () => {
     try {
-      const res = await fetch(`${API}/chat/sessions`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/chat/sessions`, { cache: 'no-store' })
       if (!res.ok) return
       const data = await res.json()
       set({ chatSessions: data.sessions || [] })
@@ -385,7 +397,7 @@ export const useJarvisStore = create((set, get) => ({
 
   createChatSession: async (title = 'New chat') => {
     try {
-      const res = await fetch(`${API}/chat/sessions`, {
+      const res = await jfetch(`${api()}/chat/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -407,7 +419,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchVaultStatus: async () => {
     try {
-      const res = await fetch(`${API}/vault/status`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/vault/status`, { cache: 'no-store' })
       if (!res.ok) return
       const data = await res.json()
       set({ vaultStatus: data })
@@ -417,7 +429,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchVaultNotes: async () => {
     try {
-      const res = await fetch(`${API}/vault/notes?limit=40`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/vault/notes?limit=40`, { cache: 'no-store' })
       if (!res.ok) return
       const data = await res.json()
       set({ vaultNotes: data.notes || [] })
@@ -428,7 +440,7 @@ export const useJarvisStore = create((set, get) => ({
   syncVault: async () => {
     set({ statusMsg: 'SYNCING VAULT...' })
     try {
-      const res = await fetch(`${API}/vault/sync`, { method: 'POST' })
+      const res = await jfetch(`${api()}/vault/sync`, { method: 'POST' })
       const data = await res.json()
       set({ statusMsg: `VAULT SYNCED — ${data.indexed_chunks || 0} chunks` })
       await get().fetchVaultNotes()
@@ -441,7 +453,7 @@ export const useJarvisStore = create((set, get) => ({
 
   saveToVault: async (content, title) => {
     try {
-      const res = await fetch(`${API}/chat/save`, {
+      const res = await jfetch(`${api()}/chat/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, title: title || 'JARVIS note', folder: 'Chat' }),
@@ -461,7 +473,7 @@ export const useJarvisStore = create((set, get) => ({
     try {
       const body = { action_id: actionId, session_id: sessionId }
       if (confirmToken) body.confirm_token = confirmToken
-      const res = await fetch(`${API}/chat/action/confirm`, {
+      const res = await jfetch(`${api()}/chat/action/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -486,7 +498,7 @@ export const useJarvisStore = create((set, get) => ({
       if (layers) params.set('layers', Array.isArray(layers) ? layers.join(',') : layers)
       if (limit) params.set('limit', String(limit))
       const qs = params.toString()
-      const res = await fetch(`${API}/graph${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/graph${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
       if (!res.ok) throw new Error('graph failed')
       const data = await res.json()
       set({ graphData: data, graphProjection: data })
@@ -499,7 +511,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchGestureStatus: async () => {
     try {
-      const res = await fetch(`${API}/gestures/status`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/gestures/status`, { cache: 'no-store' })
       if (!res.ok) return null
       const data = await res.json()
       set({
@@ -514,7 +526,7 @@ export const useJarvisStore = create((set, get) => ({
 
   pollGestureLatest: async () => {
     try {
-      const res = await fetch(`${API}/gestures/latest`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/gestures/latest`, { cache: 'no-store' })
       if (!res.ok) return null
       const data = await res.json()
       const current = get().gestureLatest
@@ -530,7 +542,7 @@ export const useJarvisStore = create((set, get) => ({
 
   startGestureSession: async () => {
     try {
-      const res = await fetch(`${API}/gestures/session/start`, { method: 'POST' })
+      const res = await jfetch(`${api()}/gestures/session/start`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'start failed')
       set({
@@ -551,7 +563,7 @@ export const useJarvisStore = create((set, get) => ({
 
   stopGestureSession: async () => {
     try {
-      await fetch(`${API}/gestures/session/stop`, { method: 'POST' })
+      await jfetch(`${api()}/gestures/session/stop`, { method: 'POST' })
     } catch {}
     set({
       gestureSession: { running: false, pid: null, source: null },
@@ -561,7 +573,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchHouseStatus: async () => {
     try {
-      const res = await fetch(`${API}/house/status`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/house/status`, { cache: 'no-store' })
       if (!res.ok) return null
       const data = await res.json()
       set({ houseStatus: data })
@@ -574,7 +586,7 @@ export const useJarvisStore = create((set, get) => ({
   fetchHouseEntities: async (backend) => {
     try {
       const qs = backend ? `?backend=${encodeURIComponent(backend)}` : ''
-      const res = await fetch(`${API}/house/entities${qs}`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/house/entities${qs}`, { cache: 'no-store' })
       if (!res.ok) return []
       const data = await res.json()
       set({ houseEntities: data.entities || [] })
@@ -589,7 +601,7 @@ export const useJarvisStore = create((set, get) => ({
     const { sessionId } = get()
     set({ statusMsg: `PROPOSING ${service.toUpperCase()}...` })
     try {
-      const res = await fetch(`${API}/house/service`, {
+      const res = await jfetch(`${api()}/house/service`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -622,7 +634,7 @@ export const useJarvisStore = create((set, get) => ({
   fetchBrief: async () => {
     set({ isLoading: true, statusMsg: 'COMPILING BRIEF...' })
     try {
-      const res = await fetch(`${API}/brief`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/brief`, { cache: 'no-store' })
       if (!res.ok) throw new Error('brief failed')
       const data = await res.json()
       set((state) => ({
@@ -649,7 +661,7 @@ export const useJarvisStore = create((set, get) => ({
   ingestGitHub: async (username) => {
     set({ statusMsg: `DEEP-READING ${username.toUpperCase()}...` })
     try {
-      const res = await fetch(`${API}/ingest/github/user/${username}?deep=true`)
+      const res = await jfetch(`${api()}/ingest/github/user/${username}?deep=true`)
       const data = await res.json()
       const nextRepos = data.repos || []
       if (nextRepos.length) {
@@ -672,7 +684,7 @@ export const useJarvisStore = create((set, get) => ({
 
   pollIngestStatus: async () => {
     try {
-      const res = await fetch(`${API}/ingest/status`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/ingest/status`, { cache: 'no-store' })
       const data = await res.json()
       set({
         repos: data.repos || [],
@@ -682,7 +694,7 @@ export const useJarvisStore = create((set, get) => ({
     } catch {}
   },
 
-  sendChat: async (message) => {
+  sendChat: async (message, opts = {}) => {
     const { chatHistory, sessionId, focusRepo, selectedNode, contextState } = get()
     const selectedName =
       selectedNode?.type === 'repo'
@@ -695,12 +707,14 @@ export const useJarvisStore = create((set, get) => ({
         ? contextState.active_project
         : null)
 
+    const onToken = typeof opts.onToken === 'function' ? opts.onToken : null
+
     set({
       chatHistory: [...chatHistory, { role: 'user', content: message, ts: Date.now() }],
       statusMsg: focus ? `THINKING · ${focus}…` : 'THINKING...',
     })
     try {
-      const res = await fetch(`${API}/chat/stream`, {
+      const res = await jfetch(`${api()}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -749,19 +763,24 @@ export const useJarvisStore = create((set, get) => ({
             set({ sessionId: event.session_id })
           } else if (event.type === 'token' && event.text) {
             assistant += event.text
+            try {
+              onToken?.(event.text)
+            } catch {}
             set((state) => {
               const hist = [...state.chatHistory]
               const last = hist[hist.length - 1]
               if (last?.role === 'assistant') {
                 hist[hist.length - 1] = { ...last, content: assistant, streaming: true }
               }
-              return { chatHistory: hist, statusMsg: 'SPEAKING...' }
+              return { chatHistory: hist, statusMsg: onToken ? 'SPEAKING...' : 'STREAMING...' }
             })
           } else if (event.type === 'meta') {
             meta = {
               citations: event.citations || [],
               actions: event.actions || [],
               llm_offline: Boolean(event.llm_offline),
+              demo: event.demo || null,
+              research: event.research || null,
             }
           } else if (event.type === 'done') {
             if (event.reply) assistant = event.reply
@@ -781,13 +800,25 @@ export const useJarvisStore = create((set, get) => ({
             citations: meta.citations,
             actions: meta.actions,
             llm_offline: meta.llm_offline,
+            demo: meta.demo || null,
+            research: meta.research || null,
           }
         }
-        return {
+        const next = {
           sessionId: gotSession || state.sessionId,
           chatHistory: hist,
-          statusMsg: meta.llm_offline ? 'LLM OFFLINE' : 'READY',
+          statusMsg: meta.llm_offline
+            ? 'LLM OFFLINE'
+            : meta.demo
+              ? `DEMO · ${meta.demo.title || meta.demo.id}`
+              : meta.research
+                ? `RESEARCH · ${meta.research.topic || 'done'}`
+                : 'READY',
         }
+        if (meta.demo?.id) {
+          next.activeDemoId = meta.demo.id
+        }
+        return next
       })
       // Keep thread list in sync with latest session titles / order
       void get().refreshChatSessions()
@@ -795,7 +826,7 @@ export const useJarvisStore = create((set, get) => ({
     } catch {
       // Fallback to non-streaming POST
       try {
-        const res = await fetch(`${API}/chat`, {
+        const res = await jfetch(`${api()}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message, include_context: true, session_id: sessionId }),
@@ -813,6 +844,7 @@ export const useJarvisStore = create((set, get) => ({
               citations: data.citations || [],
               actions: data.actions || [],
               llm_offline: data.llm_offline,
+              demo: data.demo || null,
             }
           } else {
             hist.push({
@@ -822,18 +854,20 @@ export const useJarvisStore = create((set, get) => ({
               citations: data.citations || [],
               actions: data.actions || [],
               llm_offline: data.llm_offline,
+              demo: data.demo || null,
             })
           }
           return {
             sessionId: data.session_id || state.sessionId,
             chatHistory: hist,
-            statusMsg: data.llm_offline ? 'LLM OFFLINE' : 'READY',
+            statusMsg: data.demo ? `DEMO · ${data.demo.title || data.demo.id}` : data.llm_offline ? 'LLM OFFLINE' : 'READY',
+            ...(data.demo?.id ? { activeDemoId: data.demo.id } : {}),
           }
         })
         void get().refreshChatSessions()
         return reply
       } catch {
-        const err = 'Backend unreachable. Start the API on port 8002.'
+        const err = 'Backend unreachable. Is the API running on localhost:8001?'
         set((state) => ({
           chatHistory: [
             ...state.chatHistory.filter((m) => !(m.role === 'assistant' && m.streaming)),
@@ -848,7 +882,7 @@ export const useJarvisStore = create((set, get) => ({
 
   fetchExternal: async () => {
     try {
-      const res = await fetch(`${API}/ingest/external`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/ingest/external`, { cache: 'no-store' })
       const data = await res.json()
       set({ hnStories: data.top || [] })
     } catch {}
@@ -857,7 +891,7 @@ export const useJarvisStore = create((set, get) => ({
   fetchGoogleCalendarStatus: async ({ silent = true } = {}) => {
     if (!silent) set({ statusMsg: 'CHECKING GOOGLE CALENDAR...' })
     try {
-      const res = await fetch(`${API}/calendar/google/status`, { cache: 'no-store' })
+      const res = await jfetch(`${api()}/calendar/google/status`, { cache: 'no-store' })
       if (!res.ok) throw new Error('calendar status failed')
       const data = await res.json()
       set((state) => ({
@@ -878,13 +912,13 @@ export const useJarvisStore = create((set, get) => ({
 
   connectGoogleCalendar: () => {
     if (typeof window === 'undefined') return
-    window.location.href = `${API}/calendar/google/connect`
+    window.location.href = `${api()}/calendar/google/connect`
   },
 
   syncGoogleCalendar: async () => {
     set({ statusMsg: 'SYNCING GOOGLE CALENDAR...' })
     try {
-      const res = await fetch(`${API}/calendar/google/sync`, { method: 'POST' })
+      const res = await jfetch(`${api()}/calendar/google/sync`, { method: 'POST' })
       if (!res.ok) throw new Error('calendar sync failed')
       const data = await res.json()
       set((state) => ({
@@ -901,7 +935,7 @@ export const useJarvisStore = create((set, get) => ({
 
   disconnectGoogleCalendar: async () => {
     try {
-      await fetch(`${API}/calendar/google/disconnect`, { method: 'DELETE' })
+      await jfetch(`${api()}/calendar/google/disconnect`, { method: 'DELETE' })
       set({ googleCalendar: DEFAULT_GOOGLE_CALENDAR, statusMsg: 'GOOGLE CALENDAR DISCONNECTED' })
       await get().fetchBrief()
     } catch {
