@@ -71,6 +71,13 @@ export const useJarvisStore = create((set, get) => ({
   shellMode: 'dashboard',
   graphData: null,
   graphProjection: null,
+  infraStatus: {
+    sites: { items: [], total: 0, up: 0, down: 0, unknown: 0 },
+    docker: { items: [], total: 0, running: 0, unhealthy: 0, source: 'unavailable' },
+  },
+  infraLoading: false,
+  selectedInfraId: null,
+  infraLogs: {},
   houseStatus: null,
   houseEntities: [],
   knowledgeDocs: 0,
@@ -505,6 +512,75 @@ export const useJarvisStore = create((set, get) => ({
       return data
     } catch {
       set({ statusMsg: 'GRAPH OFFLINE' })
+      return null
+    }
+  },
+
+  fetchInfraStatus: async ({ silent = false } = {}) => {
+    if (!silent) set({ infraLoading: true })
+    try {
+      const res = await jfetch(`${api()}/infra/status`, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`infra HTTP ${res.status}`)
+      const data = await res.json()
+      set({ infraStatus: data, infraLoading: false })
+      return data
+    } catch {
+      set((state) => ({
+        infraLoading: false,
+        infraStatus: {
+          ...state.infraStatus,
+          docker: { ...state.infraStatus.docker, source: 'unavailable', error: 'Infrastructure API unavailable' },
+        },
+        ...(!silent ? { statusMsg: 'INFRASTRUCTURE LINK OFFLINE' } : {}),
+      }))
+      return null
+    }
+  },
+
+  pollInfraNow: async ({ discover = false } = {}) => {
+    set({ infraLoading: true, statusMsg: discover ? 'DISCOVERING DEPLOYMENTS…' : 'POLLING INFRASTRUCTURE…' })
+    try {
+      const res = await jfetch(`${api()}/infra/${discover ? 'discover' : 'poll'}`, { method: 'POST' })
+      if (!res.ok) throw new Error(`infra poll HTTP ${res.status}`)
+      const data = await res.json()
+      set({ infraStatus: data, infraLoading: false, statusMsg: 'INFRASTRUCTURE TELEMETRY UPDATED' })
+      await get().fetchGraph({ limit: 180 })
+      return data
+    } catch {
+      set({ infraLoading: false, statusMsg: 'INFRASTRUCTURE POLL FAILED' })
+      return null
+    }
+  },
+
+  setSelectedInfraId: (selectedInfraId) => set({ selectedInfraId }),
+
+  fetchContainerLogs: async (containerId, tail = 120) => {
+    if (!containerId) return null
+    try {
+      const res = await jfetch(`${api()}/infra/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error(`logs HTTP ${res.status}`)
+      const data = await res.json()
+      set((state) => ({ infraLogs: { ...state.infraLogs, [containerId]: data } }))
+      return data
+    } catch {
+      const data = { container_id: containerId, logs: '', error: 'Logs unavailable' }
+      set((state) => ({ infraLogs: { ...state.infraLogs, [containerId]: data } }))
+      return data
+    }
+  },
+
+  fetchSiteHistory: async (siteId, hours = 24) => {
+    const [owner, repo] = String(siteId || '').split('/')
+    if (!owner || !repo) return null
+    try {
+      const res = await jfetch(
+        `${api()}/infra/sites/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/history?hours=${hours}`,
+        { cache: 'no-store' },
+      )
+      return res.ok ? res.json() : null
+    } catch {
       return null
     }
   },

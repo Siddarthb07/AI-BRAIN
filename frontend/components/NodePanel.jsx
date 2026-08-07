@@ -13,6 +13,8 @@ const TYPE_COLORS = {
   core: 'var(--cyan)',
   local_text: '#38bdf8',
   local_pdf: '#ff8a3d',
+  site: '#33f0c0',
+  container: '#8ae8ff',
 }
 
 const TYPE_LABELS = {
@@ -20,6 +22,8 @@ const TYPE_LABELS = {
   local_pdf: 'LOCAL PDF NODE',
   update: 'UPDATE',
   fyi: 'UPDATE',
+  site: 'GITHUB PAGES DEPLOYMENT',
+  container: 'DOCKER RUNTIME',
 }
 
 function Section({ title, children }) {
@@ -57,6 +61,7 @@ export default function NodePanel() {
   const sendChat = useJarvisStore((state) => state.sendChat)
   const setActivePanel = useJarvisStore((state) => state.setActivePanel)
   const setShellMode = useJarvisStore((state) => state.setShellMode)
+  const setSelectedInfraId = useJarvisStore((state) => state.setSelectedInfraId)
   const repos = useJarvisStore((state) => state.repos)
   const hnStories = useJarvisStore((state) => state.hnStories)
 
@@ -144,6 +149,12 @@ export default function NodePanel() {
   }
 
   const repoData = type === 'repo' ? enrichedSelectedRepo : null
+
+  const openInfra = () => {
+    setSelectedInfraId(data?.id || data?.name || selectedNode.id)
+    setShellMode('lab')
+    setActivePanel('infra')
+  }
 
   const openRepoNode = (repo) => {
     setSelectedNode({
@@ -242,8 +253,8 @@ export default function NodePanel() {
             {repoData.stars !== undefined && (
               <div
                 style={{
-                  background: 'rgba(240,180,41,0.05)',
-                  border: '1px solid rgba(240,180,41,0.2)',
+                  background: 'rgba(255,184,0,0.05)',
+                  border: '1px solid rgba(255,184,0,0.2)',
                   borderRadius: '3px',
                   padding: '4px 10px',
                   fontFamily: 'var(--font-mono)',
@@ -257,8 +268,8 @@ export default function NodePanel() {
             {repoData.file_count > 0 && (
               <div
                 style={{
-                  background: 'rgba(0,255,159,0.05)',
-                  border: '1px solid rgba(0,255,159,0.2)',
+                  background: 'rgba(46,230,200,0.05)',
+                  border: '1px solid rgba(46,230,200,0.2)',
                   borderRadius: '3px',
                   padding: '4px 10px',
                   fontFamily: 'var(--font-mono)',
@@ -444,6 +455,44 @@ export default function NodePanel() {
         </div>
       ) : null}
 
+      {type === 'site' && data ? (
+        <div className="infra-node-readout">
+          <div className={`infra-status-label status-${data.status || 'unknown'}`}>
+            {(data.status || 'unknown').toUpperCase()} · {data.status_code || 'NO HTTP'}
+          </div>
+          <div className="infra-node-grid">
+            <span>STREAK</span><strong>{data.uptime_label || data.uptime_streak?.label || 'NO CHECKS YET'}</strong>
+            <span>LATENCY</span><strong>{data.latency_ms != null ? `${data.latency_ms} ms` : 'UNKNOWN'}</strong>
+            <span>24H UPTIME</span><strong>{data.uptime_24h?.uptime_pct != null ? `${data.uptime_24h.uptime_pct}%` : 'OBSERVING'}</strong>
+            <span>7D UPTIME</span><strong>{data.uptime_7d?.uptime_pct != null ? `${data.uptime_7d.uptime_pct}%` : 'OBSERVING'}</strong>
+          </div>
+          <div style={{ display: 'grid', gap: 8, marginTop: 14 }}>
+            <a className="btn" href={data.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+              OPEN SITE ↗
+            </a>
+            <button className="btn" onClick={openInfra}>VIEW INFRA TELEMETRY</button>
+          </div>
+        </div>
+      ) : null}
+
+      {type === 'container' && data ? (
+        <div className="infra-node-readout">
+          <div className={`infra-status-label status-${data.state === 'running' && data.health === 'unhealthy' ? 'down' : data.state === 'running' ? 'up' : 'unknown'}`}>
+            {(data.state || 'unknown').toUpperCase()} · {(data.health === 'none' ? 'NO HEALTHCHECK' : data.health || 'unknown').toUpperCase()}
+          </div>
+          <div className="infra-node-grid">
+            <span>UPTIME</span><strong>{data.uptime_label || (data.state === 'running' ? 'UP · UNKNOWN' : 'STOPPED')}</strong>
+            <span>IMAGE</span><strong>{data.image || 'unknown'}</strong>
+            <span>CPU</span><strong>{data.cpu_percent != null ? `${data.cpu_percent}%` : 'N/A'}</strong>
+            <span>MEMORY</span><strong>{data.memory?.percent != null ? `${data.memory.percent}%` : 'N/A'}</strong>
+            <span>PORTS</span><strong>{data.ports?.join(', ') || 'internal'}</strong>
+          </div>
+          <button className="btn" onClick={openInfra} style={{ width: '100%', marginTop: 14 }}>
+            VIEW READ-ONLY LOGS
+          </button>
+        </div>
+      ) : null}
+
       {relatedRepos.length > 0 && (
         <Section title={type === 'news' ? 'RELATED REPOS' : 'SIMILAR REPOS'}>
           {relatedRepos.map(({ repo, score }) => (
@@ -482,7 +531,7 @@ export default function NodePanel() {
                 lineHeight: 1.45,
                 marginBottom: 10,
                 paddingBottom: 8,
-                borderBottom: '1px solid rgba(240,180,41,0.12)',
+                borderBottom: '1px solid rgba(0,217,255,0.12)',
               }}
             >
               {item}

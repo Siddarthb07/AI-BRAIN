@@ -47,6 +47,14 @@ export function parseVoiceCommand(raw = '') {
   if (!text || text.length < 2) return null
 
   // --- Shell / navigation ---
+  if (/\b(is|are)\b.*\b(my |the )?(site|deployment|github pages?)\b.*\b(down|online|up|working)\b/.test(text)) {
+    return { type: 'infra_status', ack: null }
+  }
+  if (
+    /\b(open |go to |show |switch to )?(the )?(infrastructure|infra|deployments?|containers?|docker)( command center| panel| status)?\b/.test(text)
+  ) {
+    return { type: 'navigate', shell: 'lab', panel: 'infra', ack: 'Opening infrastructure command center.' }
+  }
   if (/\b(open |go to |show |switch to )?(the )?(dashboard|dash|home|memory map)\b/.test(text)) {
     return { type: 'navigate', shell: 'dashboard', ack: 'Opening dashboard.' }
   }
@@ -281,6 +289,20 @@ export async function applyVoiceCommand(cmd, getStore) {
     case 'navigate': {
       goShell(store, cmd.shell, cmd.panel)
       return { handled: true, speak: cmd.ack }
+    }
+    case 'infra_status': {
+      await store.fetchInfraStatus({ silent: true })
+      const infra = getStore().infraStatus || {}
+      const sites = infra.sites || {}
+      const docker = infra.docker || {}
+      goShell(store, 'lab', 'infra')
+      const siteLine = sites.total
+        ? `${sites.up || 0} of ${sites.total} sites are online${sites.down ? `, with ${sites.down} active incident${sites.down === 1 ? '' : 's'}` : ''}`
+        : 'No GitHub Pages deployments have been discovered yet'
+      const dockerLine = docker.total
+        ? `${docker.running || 0} of ${docker.total} containers are running`
+        : 'Docker telemetry is unavailable'
+      return { handled: true, speak: `${siteLine}. ${dockerLine}.` }
     }
     case 'wake': {
       store.setWakeEnabled(Boolean(cmd.value))

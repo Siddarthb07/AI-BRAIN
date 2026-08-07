@@ -1,4 +1,29 @@
 services:
+  # ── Read-only Docker API boundary ────────────────────────────────────
+  # The backend never receives the Docker socket. This proxy only exposes
+  # read endpoints used for container inventory, stats, health, and logs.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: jarvis-docker-proxy
+    environment:
+      - CONTAINERS=1
+      - INFO=1
+      - NETWORKS=1
+      - SERVICES=0
+      - TASKS=0
+      - IMAGES=0
+      - VOLUMES=0
+      - POST=0
+      - AUTH=0
+      - SECRETS=0
+      - SWARM=0
+      - SYSTEM=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "2375"
+    restart: unless-stopped
+
   # ── Vector Database ──────────────────────────────────────────────────
   qdrant:
     image: qdrant/qdrant:latest
@@ -41,6 +66,14 @@ services:
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-1024}
       - LLM_HISTORY_TURNS=${LLM_HISTORY_TURNS:-6}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_USERNAME=${GITHUB_USERNAME:-Siddarthb07}
+      - DOCKER_MONITOR_ENABLED=${DOCKER_MONITOR_ENABLED:-1}
+      - DOCKER_HOST=tcp://docker-proxy:2375
+      - INFRA_DOCKER_SNAPSHOT_PATH=/app/data/infra/docker_snapshot.json
+      - INFRA_SITE_POLL_SEC=${INFRA_SITE_POLL_SEC:-60}
+      - INFRA_DOCKER_POLL_SEC=${INFRA_DOCKER_POLL_SEC:-10}
+      - INFRA_PAGES_DISCOVERY_SEC=${INFRA_PAGES_DISCOVERY_SEC:-1800}
+      - INFRA_RETENTION_DAYS=${INFRA_RETENTION_DAYS:-30}
       # Always /vault inside the container; host folder is bind-mounted below
       - VAULT_PATH=/vault
       - JARVIS_MASTER_KEY=${JARVIS_MASTER_KEY:-}
@@ -68,12 +101,15 @@ services:
       - backend_data:/app/data
       # Host-visible demos for Monaco edit + Open in Cursor
       - ./backend/data/generated:/app/data/generated
+      - ./backend/data/infra:/app/data/infra
       - whisper_cache:/root/.cache/whisper
       - huggingface_cache:/root/.cache/huggingface
       - C:/Users/siddu/OneDrive/Desktop/jarvis-vault:/vault
     depends_on:
       qdrant:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"

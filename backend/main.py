@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import brief, calendar, chat, context, demos, graph, gestures, house, ingest, media, research, vault, vision, voice
+from routers import brief, calendar, chat, context, demos, graph, gestures, house, infra, ingest, media, research, vault, vision, voice
 from services import config
 from services.auth import JarvisAuthMiddleware
 from services import demo_builder as demo_builder_svc
@@ -50,6 +50,7 @@ app.include_router(house.router, prefix="/house", tags=["house"])
 app.include_router(vision.router, prefix="/vision", tags=["vision"])
 app.include_router(demos.router, prefix="/demos", tags=["demos"])
 app.include_router(research.router, prefix="/research", tags=["research"])
+app.include_router(infra.router, prefix="/infra", tags=["infra"])
 
 generated_root = Path(__file__).parent / "data" / "generated"
 generated_root.mkdir(parents=True, exist_ok=True)
@@ -70,6 +71,20 @@ async def _warm_hot_path() -> None:
         print(f"[startup] knowledge docs cached: {len(rag.load_local_store())}")
     except Exception as exc:
         print(f"[startup] warm failed: {exc}")
+    try:
+        from services import infra_monitor
+
+        infra_monitor.start_poller()
+        print("[startup] infrastructure monitor armed")
+    except Exception as exc:
+        print(f"[startup] infrastructure monitor failed: {exc}")
+
+
+@app.on_event("shutdown")
+async def _stop_background_tasks() -> None:
+    from services import infra_monitor
+
+    await infra_monitor.stop_poller()
 
 
 @app.get("/")
@@ -94,6 +109,7 @@ def root():
             "/vision",
             "/demos",
             "/research",
+            "/infra",
             "/demos-static",
             "/generated",
         ],

@@ -246,7 +246,7 @@ export default function VisionPanel() {
                 padding: '8px 14px',
                 borderColor: tab === t.id ? 'var(--amber)' : undefined,
                 color: tab === t.id ? 'var(--amber)' : undefined,
-                background: tab === t.id ? 'rgba(255,159,67,0.12)' : undefined,
+                background: tab === t.id ? 'rgba(0,217,255,0.12)' : undefined,
               }}
             >
               {t.label}
@@ -259,13 +259,15 @@ export default function VisionPanel() {
         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 18, minHeight: 0 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
             <div
+              className="holo-corners"
               style={{
                 flex: 1,
                 minHeight: 300,
-                borderRadius: 6,
+                borderRadius: 2,
                 overflow: 'hidden',
-                border: '1px solid rgba(255,120,80,0.35)',
-                background: 'radial-gradient(ellipse at 30% 20%, #1a1020, #050608 70%)',
+                border: '1px solid rgba(0,217,255,0.35)',
+                background: 'radial-gradient(ellipse at 30% 20%, #06182a, #020810 70%)',
+                boxShadow: 'inset 0 0 30px rgba(0,217,255,0.06)',
                 position: 'relative',
               }}
             >
@@ -275,6 +277,25 @@ export default function VisionPanel() {
                 playsInline
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: live ? 'block' : 'none' }}
               />
+              {/* Targeting reticle overlay */}
+              <div aria-hidden className="reticle-pulse" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', top: '50%', left: 14, width: 18, height: 1, background: 'rgba(0,217,255,0.5)' }} />
+                <div style={{ position: 'absolute', top: '50%', right: 14, width: 18, height: 1, background: 'rgba(0,217,255,0.5)' }} />
+                <div style={{ position: 'absolute', left: '50%', top: 14, height: 18, width: 1, background: 'rgba(0,217,255,0.5)' }} />
+                <div style={{ position: 'absolute', left: '50%', bottom: 14, height: 18, width: 1, background: 'rgba(0,217,255,0.5)' }} />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: 46,
+                    height: 46,
+                    borderRadius: '50%',
+                    border: '1px dashed rgba(0,217,255,0.4)',
+                  }}
+                />
+              </div>
               {!live && (
                 <div
                   style={{
@@ -314,10 +335,12 @@ export default function VisionPanel() {
                       fontFamily: 'var(--font-mono)',
                       fontSize: 15,
                       letterSpacing: '0.12em',
-                      color: live ? 'var(--amber)' : 'var(--text-primary)',
-                      background: 'rgba(0,0,0,0.55)',
+                      color: live ? 'var(--cyan)' : 'var(--text-primary)',
+                      textShadow: live ? '0 0 8px rgba(0,217,255,0.5)' : 'none',
+                      background: 'rgba(2,8,16,0.6)',
+                      border: '1px solid rgba(0,217,255,0.2)',
                       padding: '8px 12px',
-                      borderRadius: 4,
+                      borderRadius: 2,
                     }}
                   >
                     {overlayNote || (live ? 'LIVE' : '')}
@@ -351,7 +374,7 @@ export default function VisionPanel() {
                 width: '100%',
                 padding: '12px 14px',
                 background: 'rgba(0,0,0,0.35)',
-                border: '1px solid rgba(255,170,60,0.25)',
+                border: '1px solid rgba(0,217,255,0.25)',
                 color: 'var(--text-primary)',
                 fontFamily: 'var(--font-body)',
                 fontSize: 16,
@@ -377,7 +400,7 @@ export default function VisionPanel() {
                   maxHeight: 180,
                   objectFit: 'cover',
                   borderRadius: 4,
-                  border: '1px solid rgba(255,170,60,0.2)',
+                  border: '1px solid rgba(0,217,255,0.2)',
                 }}
               />
             ) : null}
@@ -439,8 +462,8 @@ export default function VisionPanel() {
             <div
               style={{
                 padding: 14,
-                border: '1px solid rgba(240,180,41,0.25)',
-                background: 'rgba(240,180,41,0.06)',
+                border: '1px solid rgba(255,184,0,0.25)',
+                background: 'rgba(255,184,0,0.06)',
                 borderRadius: 4,
               }}
             >

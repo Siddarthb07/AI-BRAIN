@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from services import action_queue, event_bus, store, vault
+from services import action_queue, event_bus, infra_monitor, store, vault
 from services.house import get_adapter
 
 
@@ -14,7 +14,7 @@ def _now() -> str:
 
 
 def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[str, Any]:
-    wanted = set(layers or ["core", "repos", "vault", "news", "local", "actions", "demos"])
+    wanted = set(layers or ["core", "infra", "repos", "vault", "news", "local", "actions", "demos"])
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     pulses = [
@@ -26,6 +26,31 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
 
     if "core" in wanted:
         nodes.append({"id": "jarvis", "type": "core", "label": "JARVIS", "meta": {}})
+
+    if "infra" in wanted:
+        for site in infra_monitor.sites()[:24]:
+            sid = f"site:{site.get('id')}"
+            nodes.append(
+                {
+                    "id": sid,
+                    "type": "site",
+                    "label": site.get("name") or site.get("repo") or "Pages site",
+                    "meta": site,
+                }
+            )
+            repo_id = f"repo:{site.get('repo')}"
+            edges.append({"source": repo_id, "target": sid, "kind": "deployment", "weight": 1.3})
+        for container in infra_monitor.containers()[:30]:
+            cid = f"container:{container.get('id')}"
+            nodes.append(
+                {
+                    "id": cid,
+                    "type": "container",
+                    "label": container.get("name") or container.get("id") or "container",
+                    "meta": container,
+                }
+            )
+            edges.append({"source": "jarvis", "target": cid, "kind": "runtime", "weight": 1.1})
 
     if "repos" in wanted:
         for repo in store.get_repos()[:40]:
@@ -39,6 +64,8 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
                         "language": repo.get("language"),
                         "description": repo.get("description"),
                         "topics": repo.get("topics") or [],
+                        "archived": bool(repo.get("archived")),
+                        "url": repo.get("url"),
                     },
                 }
             )

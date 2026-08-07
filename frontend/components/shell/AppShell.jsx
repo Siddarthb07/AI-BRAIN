@@ -9,11 +9,11 @@ export default function AppShell({ children, sidebar, rightPanel, miniMap }) {
             style={{
               width: 268,
               flexShrink: 0,
-              borderRight: '1px solid rgba(255,170,80,0.12)',
+              borderRight: '1px solid rgba(0,217,255,0.12)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              background: 'rgba(12, 10, 18, 0.55)',
+              background: 'rgba(3, 12, 22, 0.55)',
             }}
           >
             {sidebar}

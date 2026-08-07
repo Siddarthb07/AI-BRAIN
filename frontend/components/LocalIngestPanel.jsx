@@ -66,8 +66,8 @@ function ResultRow({ result }) {
       alignItems: 'center',
       padding: '5px 10px',
       marginBottom: '4px',
-      background: isOk ? 'rgba(0,255,159,0.04)' : 'rgba(255,56,96,0.04)',
-      border: `1px solid ${isOk ? 'rgba(0,255,159,0.15)' : 'rgba(255,56,96,0.15)'}`,
+      background: isOk ? 'rgba(46,230,200,0.04)' : 'rgba(255,59,48,0.04)',
+      border: `1px solid ${isOk ? 'rgba(46,230,200,0.15)' : 'rgba(255,59,48,0.15)'}`,
       borderRadius: '3px',
     }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: isOk ? 'var(--green)' : 'var(--red)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>

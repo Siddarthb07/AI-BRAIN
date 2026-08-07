@@ -4,6 +4,7 @@ import { useJarvisStore } from '../app/store'
 import { AMERICAN_VOICE_MATCHERS, DEFAULT_SPEECH_CHUNK_CHARS, DEFAULT_SPEECH_MAX_CHARS, createStreamingSpeaker, speakText as playSpeech, stopSpeechPlayback } from '../lib/speech'
 import { resolveApiBase } from '../lib/api'
 import { routeVoiceCommand, VOICE_COMMAND_HELP } from '../lib/voiceCommands'
+import ArcReactor from './jarvis/ArcReactor'
 
 const api = () => resolveApiBase()
 const STATES = { idle: 'idle', recording: 'recording', processing: 'processing', speaking: 'speaking' }
@@ -348,8 +349,13 @@ export default function VoicePanel() {
           ◈ {cfg.label}
         </div>
 
-        {/* Wave visualizer */}
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', height: '50px', marginBottom: '20px' }}>
+        {/* Wave visualizer — framed by a rotating holo ring while active */}
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', height: '96px', marginBottom: '20px' }}>
+          {state !== STATES.idle ? (
+            <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', opacity: 0.7 }}>
+              <ArcReactor size={96} core={false} />
+            </div>
+          ) : null}
           {waveHeights.map((h, i) => (
             <div key={i} style={{
               width: '4px',
@@ -358,7 +364,7 @@ export default function VoicePanel() {
               borderRadius: '2px',
               transition: state === STATES.recording ? 'none' : 'height 0.4s ease',
               opacity: state === STATES.idle ? 0.3 : 0.9,
-              boxShadow: state !== STATES.idle ? `0 0 6px ${cfg.color}` : 'none',
+              boxShadow: state !== STATES.idle ? `0 0 10px ${cfg.color}` : 'none',
             }} />
           ))}
         </div>
@@ -430,9 +436,9 @@ export default function VoicePanel() {
           <div className="section-header">▸ JARVIS RESPONSE</div>
           <div className="scroll-area" style={{
             flex: 1,
-            background: 'rgba(0,255,159,0.03)',
-            border: '1px solid rgba(0,255,159,0.1)',
-            borderRadius: '4px',
+            background: 'rgba(0,217,255,0.03)',
+            border: '1px solid rgba(0,217,255,0.14)',
+            borderRadius: '2px',
             padding: '10px 12px',
             fontFamily: 'var(--font-body)',
             fontSize: '15px',

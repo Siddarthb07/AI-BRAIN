@@ -191,23 +191,29 @@ function ChatBubble({ msg, onSave }) {
         style={{
           fontFamily: 'var(--font-mono)',
           fontSize: '10px',
-          color: 'var(--text-dim)',
+          color: isUser ? 'var(--text-dim)' : 'var(--cyan)',
+          textShadow: isUser ? 'none' : '0 0 6px rgba(0,217,255,0.35)',
           marginBottom: '5px',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.16em',
         }}
       >
-        {isUser ? 'YOU' : 'JARVIS'} | {time}
+        {isUser ? 'USR' : 'J.A.R.V.I.S.'} :: {time}
       </div>
 
       <div
         style={{
           maxWidth: '96%',
           padding: '12px 16px',
-          borderRadius: isUser ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
-          background: isUser ? 'rgba(0, 200, 255, 0.08)' : 'rgba(0, 255, 159, 0.04)',
-          border: isUser ? '1px solid rgba(0, 200, 255, 0.2)' : '1px solid rgba(0, 255, 159, 0.15)',
-          fontFamily: isUser ? 'var(--font-mono)' : 'var(--font-body)',
-          fontSize: isUser ? '13px' : '15px',
+          background: isUser
+            ? 'linear-gradient(180deg, rgba(0, 217, 255, 0.1), rgba(0, 217, 255, 0.04))'
+            : 'linear-gradient(180deg, rgba(2, 20, 36, 0.7), rgba(2, 12, 24, 0.6))',
+          border: isUser ? '1px solid rgba(0, 217, 255, 0.3)' : '1px solid rgba(0, 217, 255, 0.14)',
+          boxShadow: isUser ? '0 0 12px rgba(0, 217, 255, 0.08)' : 'inset 0 0 18px rgba(0, 217, 255, 0.03)',
+          clipPath: isUser
+            ? 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)'
+            : 'polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: isUser ? '13px' : '14px',
           color: isUser ? 'var(--cyan)' : 'var(--text-primary)',
           lineHeight: 1.7,
           whiteSpace: 'pre-wrap',
@@ -345,8 +351,8 @@ function ChatBubble({ msg, onSave }) {
 function ThinkingIndicator() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)', letterSpacing: '0.1em' }}>
-        JARVIS PROCESSING
+      <div className="decode-text" style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--cyan)', letterSpacing: '0.2em', textShadow: '0 0 6px rgba(0,217,255,0.4)' }}>
+        PROCESSING
       </div>
       <div style={{ display: 'flex', gap: '3px' }}>
         {[0, 1, 2].map((i) => (
@@ -355,7 +361,7 @@ function ThinkingIndicator() {
             className="voice-bar"
             style={{
               height: '12px',
-              background: 'var(--green)',
+              background: 'var(--cyan)',
               animationDelay: `${i * 0.15}s`,
             }}
           />
@@ -478,7 +484,7 @@ export default function ChatPanel() {
         {thinking && <ThinkingIndicator />}
       </div>
 
-      <div style={{ padding: '16px 18px', borderTop: '1px solid rgba(255,170,80,0.12)' }}>
+      <div style={{ padding: '16px 18px', borderTop: '1px solid rgba(0,217,255,0.14)' }}>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
           <textarea
             className="input-cyber"

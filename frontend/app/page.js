@@ -19,8 +19,12 @@ import WakePanel, { WakeRuntime } from '../components/WakePanel'
 import GestureRuntime from '../components/GestureRuntime'
 import GlobalVoicePTT from '../components/GlobalVoicePTT'
 import VisionCaptureRuntime from '../components/VisionCaptureRuntime'
+import HudOverlay from '../components/jarvis/HudOverlay'
+import JarvisBackground from '../components/jarvis/JarvisBackground'
+import BootSequence from '../components/jarvis/BootSequence'
 
 const BrainGraph = lazy(() => import('../components/BrainGraph'))
+const InfraPanel = lazy(() => import('../components/InfraPanel'))
 
 const SHELL_RAIL = [
   { id: 'dashboard', label: 'Dash' },
@@ -41,6 +45,7 @@ const LAB_RAIL = [
   { id: 'studio', label: 'Studio' },
   { id: 'ingest', label: 'Ingest' },
   { id: 'graph', label: 'Graph' },
+  { id: 'infra', label: 'Infra' },
   { id: 'vision', label: 'Vision' },
   { id: 'wake', label: 'Wake' },
 ]
@@ -159,6 +164,7 @@ export default function Page() {
   const fetchVaultStatus = useJarvisStore((s) => s.fetchVaultStatus)
   const fetchGraph = useJarvisStore((s) => s.fetchGraph)
   const fetchContext = useJarvisStore((s) => s.fetchContext)
+  const fetchInfraStatus = useJarvisStore((s) => s.fetchInfraStatus)
 
   const nodeCount = (repos?.length || 0) + (vaultNotes?.length || 0) + (knowledgeDocs || 0)
   const showMiniMap = shellMode === 'work' && nodeCount > 0 && activePanel === 'chat'
@@ -175,12 +181,15 @@ export default function Page() {
     fetchGoogleCalendarStatus({ silent: true })
     pollIngestStatus()
     fetchGraph()
+    fetchInfraStatus({ silent: true })
     fetchContext()
     const t1 = setInterval(pollIngestStatus, 15000)
     const t2 = setInterval(() => checkBackendHealth({ silent: true }), 20000)
+    const t3 = setInterval(() => fetchInfraStatus({ silent: true }), 45000)
     return () => {
       clearInterval(t1)
       clearInterval(t2)
+      clearInterval(t3)
     }
   }, [
     checkBackendHealth,
@@ -189,6 +198,7 @@ export default function Page() {
     fetchExternal,
     fetchGoogleCalendarStatus,
     fetchGraph,
+    fetchInfraStatus,
     fetchVaultNotes,
     fetchVaultStatus,
     loadChatSession,
@@ -206,7 +216,7 @@ export default function Page() {
       }
     } else if (id === 'lab') {
       setLayoutMode('lab')
-      if (!['demos', 'studio', 'ingest', 'graph', 'vision', 'wake'].includes(activePanel)) {
+      if (!['demos', 'studio', 'ingest', 'graph', 'infra', 'vision', 'wake'].includes(activePanel)) {
         setActivePanel('demos')
       }
     }
@@ -250,6 +260,12 @@ export default function Page() {
             <BrainGraph />
           </Suspense>
         )
+      case 'infra':
+        return (
+          <Suspense fallback={<BrainLoading />}>
+            <InfraPanel />
+          </Suspense>
+        )
       case 'vision':
         return <VisionPanel />
       case 'wake':
@@ -280,12 +296,19 @@ export default function Page() {
       <GestureRuntime />
       <GlobalVoicePTT />
       <VisionCaptureRuntime />
+      <JarvisBackground />
+      <HudOverlay />
+      <BootSequence />
       <HUD />
+      <div aria-hidden className="hud-corner hud-corner--tl" />
+      <div aria-hidden className="hud-corner hud-corner--tr" />
+      <div aria-hidden className="hud-corner hud-corner--bl" />
+      <div aria-hidden className="hud-corner hud-corner--br" />
       {healthState.demo_mode ? (
         <div
           style={{
             marginTop: 52,
-            background: 'rgba(240,180,41,0.15)',
+            background: 'rgba(255,184,0,0.12)',
             color: 'var(--gold)',
             textAlign: 'center',
             fontFamily: 'var(--font-mono)',

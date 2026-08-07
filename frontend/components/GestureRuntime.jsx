@@ -858,7 +858,7 @@ export default function GestureRuntime() {
               if (landmarksList.length >= 2) {
                 const p0 = landmarksList[0][9]
                 const p1 = landmarksList[1][9]
-                ctx.strokeStyle = 'rgba(240,180,41,0.85)'
+                ctx.strokeStyle = 'rgba(0,217,255,0.85)'
                 ctx.lineWidth = 2
                 ctx.setLineDash([6, 4])
                 ctx.beginPath()

@@ -6,17 +6,19 @@ import { formatIstEventWhen, formatIstEventDateTime } from '../lib/time'
 import { resolveApiBase } from '../lib/api'
 import { AMERICAN_VOICE_MATCHERS, clipForSpeech, createStreamingSpeaker, speakText } from '../lib/speech'
 import { routeVoiceCommand } from '../lib/voiceCommands'
+import ArcReactor from './jarvis/ArcReactor'
 
 const BrainGraph = lazy(() => import('./BrainGraph'))
 
 const api = () => resolveApiBase()
 
 const glass = {
-  background: 'rgba(12, 10, 18, 0.88)',
+  background: 'linear-gradient(160deg, rgba(2, 18, 34, 0.86), rgba(2, 10, 20, 0.82))',
   backdropFilter: 'blur(14px)',
-  border: '1px solid rgba(255, 170, 80, 0.16)',
-  borderRadius: '8px',
-  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
+  border: '1px solid rgba(0, 217, 255, 0.24)',
+  borderRadius: '3px',
+  boxShadow: '0 12px 40px rgba(0, 0, 0, 0.45), 0 0 18px rgba(0, 217, 255, 0.07), inset 0 0 28px rgba(0, 217, 255, 0.04)',
+  clipPath: 'polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px)',
 }
 
 function SectionLabel({ children }) {
@@ -43,20 +45,8 @@ function AttentionChip({ label, ok, detail, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 10px',
-        borderRadius: 4,
-        border: `1px solid ${ok ? 'rgba(0,200,255,0.35)' : 'rgba(255,255,255,0.08)'}`,
-        background: ok ? 'rgba(0,200,255,0.08)' : 'rgba(0,0,0,0.25)',
-        color: ok ? 'var(--cyan)' : 'var(--text-dim)',
-        fontFamily: 'var(--font-mono)',
-        fontSize: 11,
-        letterSpacing: '0.06em',
-        cursor: onClick ? 'pointer' : 'default',
-      }}
+      className={`hex-chip${ok ? ' is-on' : ' is-off'}`}
+      style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
       <span
         style={{
@@ -65,6 +55,7 @@ function AttentionChip({ label, ok, detail, onClick }) {
           borderRadius: '50%',
           background: ok ? 'var(--cyan)' : 'var(--text-dim)',
           boxShadow: ok ? '0 0 6px var(--cyan)' : 'none',
+          flexShrink: 0,
         }}
       />
       {label}
@@ -80,15 +71,18 @@ function BrainLoading() {
         width: '100%',
         height: '100%',
         display: 'flex',
+        flexDirection: 'column',
+        gap: 18,
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'var(--text-dim)',
+        color: 'var(--cyan)',
         fontFamily: 'var(--font-mono)',
         fontSize: '10px',
-        letterSpacing: '0.12em',
+        letterSpacing: '0.3em',
       }}
     >
-      LOADING MEMORY MAP...
+      <ArcReactor size={72} />
+      <span className="decode-text">INITIALIZING MEMORY CORE…</span>
     </div>
   )
 }
@@ -132,6 +126,8 @@ export default function DashboardPanel() {
   const setActiveProject = useJarvisStore((s) => s.setActiveProject)
   const repos = useJarvisStore((s) => s.repos)
   const openDemo = useJarvisStore((s) => s.openDemo)
+  const setSelectedInfraId = useJarvisStore((s) => s.setSelectedInfraId)
+  const infraStatus = useJarvisStore((s) => s.infraStatus)
 
   const [vaultLine, setVaultLine] = useState('')
   const [dockInput, setDockInput] = useState('')
@@ -327,6 +323,13 @@ export default function DashboardPanel() {
       setLayoutMode('lab')
       return
     }
+    if (selectedNode.type === 'site' || selectedNode.type === 'container') {
+      setSelectedInfraId(selectedNode.data?.id || selectedNode.data?.name || selectedNode.id)
+      setShellMode('lab')
+      setLayoutMode('lab')
+      setActivePanel('infra')
+      return
+    }
     setDockBusy(true)
     const speaker = createStreamingSpeaker({
       lang: 'en-US',
@@ -417,7 +420,7 @@ export default function DashboardPanel() {
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-void)' }}>
+    <div className="cinematic-dash" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-void)' }}>
       <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
         <Suspense fallback={<BrainLoading />}>
           <BrainGraph hudInset={{ left: 336, bottom: 78, maxWidth: 280 }} />
@@ -427,35 +430,83 @@ export default function DashboardPanel() {
             position: 'absolute',
             inset: 0,
             background:
-              'radial-gradient(ellipse at center, transparent 50%, rgba(5,10,15,0.25) 75%, rgba(5,10,15,0.7) 100%)',
+              'radial-gradient(ellipse at center, transparent 50%, rgba(2,8,16,0.3) 75%, rgba(2,8,16,0.75) 100%)',
             pointerEvents: 'none',
           }}
         />
+        {/* Radar sweep + centerpiece glow behind the memory core */}
+        <div aria-hidden className="dash-radar-sweep" />
+        <div aria-hidden className="dash-centerpiece-glow" />
+        {/* Arc-reactor ring frame around the memory core */}
         <div
+          aria-hidden
           style={{
             position: 'absolute',
-            top: '16%',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 'min(62vh, 640px)',
+            height: 'min(62vh, 640px)',
+            pointerEvents: 'none',
+            zIndex: 1,
+            opacity: 0.5,
+          }}
+        >
+          <div className="arc-ring arc-ring--arcs" style={{ animationDuration: '48s' }} />
+          <div className="arc-ring arc-ring--ticks" style={{ inset: '4%', animationDuration: '90s' }} />
+          <div className="arc-ring arc-ring--dashed" style={{ inset: '9%', animationDuration: '64s' }} />
+        </div>
+        {/* Targeting reticle crosshair ticks */}
+        <div aria-hidden className="reticle-pulse" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
+          <div style={{ position: 'absolute', top: '50%', left: 'calc(50% - min(34vh, 352px))', width: 22, height: 1, background: 'rgba(0,217,255,0.55)' }} />
+          <div style={{ position: 'absolute', top: '50%', right: 'calc(50% - min(34vh, 352px))', width: 22, height: 1, background: 'rgba(0,217,255,0.55)' }} />
+          <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - min(34vh, 352px))', height: 22, width: 1, background: 'rgba(0,217,255,0.55)' }} />
+          <div style={{ position: 'absolute', left: '50%', bottom: 'calc(50% - min(34vh, 352px))', height: 22, width: 1, background: 'rgba(0,217,255,0.55)' }} />
+        </div>
+        <div
+          className="decode-text"
+          style={{
+            position: 'absolute',
+            top: '15%',
             left: '50%',
             transform: 'translateX(-50%)',
             fontFamily: 'var(--font-display)',
-            fontSize: '10px',
-            letterSpacing: '0.28em',
+            fontSize: '11px',
+            letterSpacing: '0.42em',
             color: 'var(--cyan)',
-            opacity: 0.35,
+            opacity: 0.55,
             pointerEvents: 'none',
             zIndex: 1,
             textAlign: 'center',
+            textShadow: '0 0 12px rgba(0,217,255,0.5)',
           }}
         >
-          MEMORY MAP
-          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', letterSpacing: '0.12em', opacity: 0.8 }}>
-            {pulseCount} pulses · {demoNodeCount} demos
+          NEURAL MEMORY CORE
+          <div style={{ marginTop: 7, fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.2em', opacity: 0.85 }}>
+            {pulseCount} PULSES · {demoNodeCount} DEMOS
           </div>
+        </div>
+        <div aria-hidden className="core-telemetry core-telemetry--nw">
+          <span>NEURAL LINK</span>
+          <strong>{healthState.qdrant ? 'SYNCED' : 'STANDBY'}</strong>
+        </div>
+        <div aria-hidden className="core-telemetry core-telemetry--ne">
+          <span>ACTIVE MODEL</span>
+          <strong>{String(primary).toUpperCase()}</strong>
+        </div>
+        <div aria-hidden className="core-telemetry core-telemetry--sw">
+          <span>MEMORY PULSES</span>
+          <strong>{String(pulseCount).padStart(3, '0')}</strong>
+        </div>
+        <div aria-hidden className="core-telemetry core-telemetry--se">
+          <span>BUILDS INDEXED</span>
+          <strong>{String(demoCount).padStart(3, '0')}</strong>
         </div>
       </div>
 
       {/* Attention strip */}
       <div
+        className="cinematic-status-strip"
         style={{
           ...glass,
           position: 'absolute',
@@ -471,13 +522,19 @@ export default function DashboardPanel() {
           alignItems: 'center',
           justifyContent: 'center',
           pointerEvents: 'auto',
-          background: 'rgba(0, 8, 18, 0.7)',
+          background: 'linear-gradient(180deg, rgba(2, 14, 26, 0.78), rgba(2, 8, 16, 0.72))',
         }}
       >
         <AttentionChip label="GROQ" ok={Boolean(healthState.groq)} detail={String(model).split('/').pop()?.slice(0, 14)} />
         <AttentionChip label="RESEARCH" ok={Boolean(healthState.groq)} detail="compound" onClick={() => setDockInput('Research ')} />
         <AttentionChip label="VISION" ok={Boolean(healthState.groq)} detail="qwen" onClick={() => goLab('vision')} />
         <AttentionChip label="DEMOS" ok={demoCount > 0} detail={String(demoCount)} onClick={() => goLab('demos')} />
+        <AttentionChip
+          label="INFRA"
+          ok={(infraStatus.sites?.down || 0) === 0 && (infraStatus.docker?.unhealthy || 0) === 0}
+          detail={`${infraStatus.sites?.up || 0}S/${infraStatus.docker?.running || 0}C`}
+          onClick={() => goLab('infra')}
+        />
         <AttentionChip label="QDRANT" ok={Boolean(healthState.qdrant)} />
         <AttentionChip label="VAULT" ok={vaultOk} />
         <AttentionChip label="HOUSE" ok={false} detail="PARKED" />
@@ -486,7 +543,7 @@ export default function DashboardPanel() {
 
       {/* Left rail */}
       <aside
-        className="left-panel"
+        className="left-panel holo-corners boot-in cinematic-module-stack cinematic-module-stack--left"
         style={{
           ...glass,
           position: 'absolute',
@@ -498,8 +555,6 @@ export default function DashboardPanel() {
           zIndex: 2,
           overflowY: 'auto',
           pointerEvents: 'auto',
-          background: 'rgba(10, 8, 16, 0.88)',
-          borderColor: 'rgba(255, 170, 80, 0.16)',
         }}
       >
         <div className="left-panel-section">
@@ -584,7 +639,7 @@ export default function DashboardPanel() {
 
       {/* Right rail */}
       <aside
-        className="left-panel"
+        className="left-panel holo-corners boot-in cinematic-module-stack cinematic-module-stack--right"
         style={{
           ...glass,
           position: 'absolute',
@@ -597,7 +652,6 @@ export default function DashboardPanel() {
           overflowY: 'auto',
           overflowX: 'hidden',
           pointerEvents: 'auto',
-          background: 'rgba(10, 8, 16, 0.9)',
         }}
       >
         <div className="left-panel-section" style={{ flexShrink: 0 }}>
@@ -638,6 +692,14 @@ export default function DashboardPanel() {
               {speakingBrief ? '…' : 'Read'}
             </button>
           </div>
+        </div>
+
+        <div className="left-panel-section dash-infra-summary" style={{ flexShrink: 0 }}>
+          <SectionLabel>Infrastructure</SectionLabel>
+          <button type="button" onClick={() => goLab('infra')}><span>Sites online</span><strong>{infraStatus.sites?.up || 0}/{infraStatus.sites?.total || 0}</strong></button>
+          <button type="button" className={infraStatus.sites?.down ? 'is-alert' : ''} onClick={() => goLab('infra')}><span>Incidents</span><strong>{infraStatus.sites?.down || 0}</strong></button>
+          <button type="button" onClick={() => goLab('infra')}><span>Containers</span><strong>{infraStatus.docker?.running || 0}/{infraStatus.docker?.total || 0}</strong></button>
+          <button type="button" className={infraStatus.docker?.unhealthy ? 'is-alert' : ''} onClick={() => goLab('infra')}><span>Unhealthy</span><strong>{infraStatus.docker?.unhealthy || 0}</strong></button>
         </div>
 
         <div className="left-panel-section" style={{ flexShrink: 0 }}>
@@ -728,8 +790,9 @@ export default function DashboardPanel() {
               style={{
                 fontSize: 12,
                 padding: '10px 6px',
-                borderColor: wakeEnabled ? 'var(--amber)' : undefined,
-                color: wakeEnabled ? 'var(--amber)' : undefined,
+                borderColor: wakeEnabled ? 'var(--gold)' : undefined,
+                color: wakeEnabled ? 'var(--gold)' : undefined,
+                textShadow: wakeEnabled ? '0 0 8px rgba(255,184,0,0.5)' : undefined,
               }}
               onClick={() => setWakeEnabled(!wakeEnabled)}
             >
@@ -741,8 +804,9 @@ export default function DashboardPanel() {
               style={{
                 fontSize: 12,
                 padding: '10px 6px',
-                borderColor: gestureControlEnabled ? 'var(--amber)' : undefined,
-                color: gestureControlEnabled ? 'var(--amber)' : undefined,
+                borderColor: gestureControlEnabled ? 'var(--gold)' : undefined,
+                color: gestureControlEnabled ? 'var(--gold)' : undefined,
+                textShadow: gestureControlEnabled ? '0 0 8px rgba(255,184,0,0.5)' : undefined,
               }}
               onClick={() => {
                 void toggleGestures()
@@ -773,6 +837,7 @@ export default function DashboardPanel() {
 
       {selectedNode ? (
         <div
+          className="holo-corners boot-in reticle-pulse"
           style={{
             ...glass,
             position: 'absolute',
@@ -786,16 +851,21 @@ export default function DashboardPanel() {
             alignItems: 'center',
             gap: 12,
             pointerEvents: 'auto',
+            borderColor: 'rgba(0, 217, 255, 0.45)',
           }}
         >
+          <span aria-hidden style={{ color: 'var(--cyan)', fontFamily: 'var(--font-mono)', fontSize: 16, textShadow: '0 0 8px rgba(0,217,255,0.6)' }}>
+            ◎
+          </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, letterSpacing: '0.16em', color: 'var(--cyan)', marginBottom: 2 }}>
-              INSPECTOR · {String(selectedNode.type || 'node').toUpperCase()}
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 10, letterSpacing: '0.28em', color: 'var(--cyan)', marginBottom: 3, textShadow: '0 0 8px rgba(0,217,255,0.5)' }}>
+              TARGET LOCK · {String(selectedNode.type || 'node').toUpperCase()}
             </div>
             <div
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: 15,
+                color: 'var(--text-primary)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -805,14 +875,14 @@ export default function DashboardPanel() {
             </div>
           </div>
           <button type="button" className="btn" style={{ fontSize: 13 }} onClick={handleAskNode} disabled={dockBusy}>
-            {selectedNode.type === 'demo' ? 'OPEN' : 'ASK'}
+            {['demo', 'site', 'container'].includes(selectedNode.type) ? 'OPEN' : 'ASK'}
           </button>
         </div>
       ) : null}
 
       {/* Ask dock — live speak */}
       <div
-        className="dock-shell"
+        className="dock-shell cinematic-command-deck"
         style={{
           position: 'absolute',
           left: '50%',
@@ -827,16 +897,37 @@ export default function DashboardPanel() {
           pointerEvents: 'auto',
         }}
       >
+        <span
+          aria-hidden
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 16,
+            color: 'var(--cyan)',
+            textShadow: '0 0 8px rgba(0,217,255,0.6)',
+            flexShrink: 0,
+          }}
+        >
+          &gt;
+        </span>
         <form onSubmit={handleDockSubmit} style={{ flex: 1, display: 'flex', gap: 8 }}>
           <input
             className="input-cyber"
             value={dockInput}
             onChange={(e) => setDockInput(e.target.value)}
-            placeholder="Ask · research · build a website…"
-            style={{ flex: 1, fontSize: 15, padding: '12px 14px', fontFamily: 'var(--font-body)' }}
+            placeholder="AWAITING COMMAND · ask · research · build a website…"
+            style={{
+              flex: 1,
+              fontSize: 14,
+              padding: '12px 14px',
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.04em',
+              background: 'transparent',
+              border: 'none',
+              boxShadow: 'none',
+            }}
           />
           <button type="submit" className="btn" disabled={!dockInput.trim() || dockBusy} style={{ fontSize: 13 }}>
-            {dockBusy ? '…' : 'Ask'}
+            {dockBusy ? '…' : 'EXECUTE'}
           </button>
         </form>
         <button type="button" className="btn" style={{ fontSize: 12 }} disabled={researchBusy} onClick={runQuickResearch}>
@@ -847,22 +938,25 @@ export default function DashboardPanel() {
         </button>
       </div>
       <div
+        className="decode-text"
         style={{
           position: 'absolute',
           left: '50%',
-          bottom: 6,
+          bottom: 8,
           transform: 'translateX(-50%)',
           zIndex: 3,
           width: 'min(720px, calc(100% - 620px))',
-          fontFamily: 'var(--font-body)',
-          fontSize: 12,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
           color: 'var(--text-dim)',
           textAlign: 'center',
           pointerEvents: 'none',
-          opacity: 0.8,
+          opacity: 0.85,
         }}
       >
-        Hold Space · say Jarvis · open demos · research … · voice commands
+        Hold Space · say &quot;Jarvis&quot; · open demos · research … · voice commands
       </div>
     </div>
   )

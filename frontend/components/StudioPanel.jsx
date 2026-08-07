@@ -245,8 +245,8 @@ function HistoryTile({ item, active, onSelect }) {
         width: '100%',
         padding: '0',
         overflow: 'hidden',
-        borderColor: active ? 'var(--gold)' : 'rgba(0,200,255,0.16)',
-        background: active ? 'rgba(240,180,41,0.08)' : 'rgba(0,10,20,0.45)',
+        borderColor: active ? 'var(--gold)' : 'rgba(0,217,255,0.16)',
+        background: active ? 'rgba(255,184,0,0.08)' : 'rgba(0,12,24,0.45)',
       }}
     >
       <div style={{ aspectRatio: '1 / 1', background: 'rgba(0,10,20,0.8)' }}>
@@ -565,9 +565,9 @@ export default function StudioPanel() {
                     className="btn"
                     onClick={() => setStylePreset(preset.id)}
                     style={{
-                      borderColor: stylePreset === preset.id ? 'var(--gold)' : 'rgba(0,200,255,0.18)',
+                      borderColor: stylePreset === preset.id ? 'var(--gold)' : 'rgba(0,217,255,0.18)',
                       color: stylePreset === preset.id ? 'var(--gold)' : 'var(--cyan)',
-                      background: stylePreset === preset.id ? 'rgba(240,180,41,0.08)' : 'rgba(0,200,255,0.05)',
+                      background: stylePreset === preset.id ? 'rgba(255,184,0,0.08)' : 'rgba(0,217,255,0.05)',
                     }}
                   >
                     {preset.label}

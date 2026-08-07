@@ -204,7 +204,7 @@ export default function DemoPanel() {
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0, gap: 0, fontFamily: 'inherit' }}>
-      <aside className="left-panel" style={{ width: 268, borderRight: '1px solid rgba(255,170,80,0.12)', overflow: 'auto', background: 'rgba(12, 10, 18, 0.55)' }}>
+      <aside className="left-panel" style={{ width: 268, borderRight: '1px solid rgba(0,217,255,0.12)', overflow: 'auto', background: 'rgba(3, 12, 22, 0.55)' }}>
         <div className="left-panel-title">Demos</div>
         <div className="left-panel-meta">Brief → Vite React site</div>
         <textarea

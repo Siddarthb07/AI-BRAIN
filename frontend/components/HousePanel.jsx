@@ -95,7 +95,7 @@ export default function HousePanel() {
                   justifyContent: 'space-between',
                   gap: 12,
                   padding: '12px 0',
-                  borderBottom: '1px solid rgba(255,170,60,0.12)',
+                  borderBottom: '1px solid rgba(0,217,255,0.12)',
                 }}
               >
                 <div style={{ minWidth: 0 }}>

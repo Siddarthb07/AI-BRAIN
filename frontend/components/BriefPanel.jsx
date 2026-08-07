@@ -35,12 +35,12 @@ function InsightItem({ text, index }) {
         animationDelay: `${index * 0.09}s`,
         padding: '7px 10px',
         marginBottom: '5px',
-        background: 'rgba(240, 180, 41, 0.03)',
-        borderLeft: '2px solid rgba(240, 180, 41, 0.3)',
-        borderRadius: '0 4px 4px 0',
+        background: 'rgba(255, 184, 0, 0.04)',
+        borderLeft: '2px solid rgba(255, 184, 0, 0.35)',
+        borderRadius: '0 2px 2px 0',
         fontFamily: 'var(--font-body)',
         fontSize: '13px',
-        color: 'rgba(240, 180, 41, 0.9)',
+        color: 'rgba(255, 200, 80, 0.9)',
         lineHeight: 1.5,
       }}
     >
@@ -181,9 +181,9 @@ export default function BriefPanel() {
                   key={event.id}
                   style={{
                     padding: '8px 10px',
-                    background: 'rgba(0,255,159,0.03)',
-                    borderLeft: '2px solid rgba(0,255,159,0.3)',
-                    borderRadius: '0 4px 4px 0',
+                    background: 'rgba(46,230,200,0.04)',
+                    borderLeft: '2px solid rgba(46,230,200,0.35)',
+                    borderRadius: '0 2px 2px 0',
                   }}
                 >
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', color: 'var(--green)', letterSpacing: '0.05em' }}>
@@ -208,9 +208,9 @@ export default function BriefPanel() {
               style={{
                 padding: '6px 10px',
                 marginBottom: '5px',
-                background: 'rgba(255,107,157,0.03)',
-                borderLeft: '2px solid rgba(255,107,157,0.25)',
-                borderRadius: '0 4px 4px 0',
+                background: 'rgba(122,168,255,0.04)',
+                borderLeft: '2px solid rgba(122,168,255,0.3)',
+                borderRadius: '0 2px 2px 0',
               }}
             >
               <a
@@ -220,7 +220,7 @@ export default function BriefPanel() {
                 style={{
                   fontFamily: 'var(--font-body)',
                   fontSize: '12px',
-                  color: 'rgba(255,107,157,0.9)',
+                  color: 'rgba(122,168,255,0.95)',
                   textDecoration: 'none',
                   lineHeight: 1.4,
                   display: 'block',

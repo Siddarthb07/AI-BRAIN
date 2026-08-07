@@ -7,36 +7,71 @@ import * as THREE from 'three'
 import { useJarvisStore } from '../app/store'
 import { enrichRepo, rankRelevantNews, repoUpdateItems } from '../lib/knowledge'
 
-/** Palette matched to the reference MEMORY MAP sphere */
-const BG = '#050a0f'
-const CORE_WHITE = '#e8f4ff'
-const NODE_LIGHT = '#a5d8ff'
-const NODE_MID = '#4a90d9'
-const NODE_DARK = '#1e50a2'
-const NODE_NEWS = '#c084fc'
-const NODE_GOLD = '#f0b429'
-const NODE_DEMO = '#34d399'
-const MESH = '#6a8aaa'
-const MESH_DIM = '#1a3a5c'
-const LINE_OUTER = '#0d2a4a'
-const MESH_NEWS = '#5a3a78'
+/** J.A.R.V.I.S. holographic palette — layers stay distinguishable */
+const BG = '#020810'
+const CORE_WHITE = '#eaffff'
+const NODE_LIGHT = '#7fdfff'
+const NODE_MID = '#00b4e0'
+const NODE_NEWS = '#7aa8ff'
+const NODE_GOLD = '#ffb800'
+const NODE_DEMO = '#2ee6c8'
+const NODE_ONLINE = '#33f0c0'
+const NODE_DEGRADED = '#ffb800'
+const NODE_DOWN = '#ff4d6d'
+const NODE_CONTAINER = '#8ae8ff'
+const NODE_HERO = '#9af6ff'
+const NODE_HERO_ALT = '#ffd56a'
+const NODE_ARCHIVED = '#3d5f78'
+const NODE_ACCENT = '#ff4d6d'
+const NODE_ACCENT_SOFT = '#ff7a8a'
+const MESH = '#3e88b0'
+const MESH_DIM = '#123a58'
+const MESH_NEWS = '#31456e'
 const MESH_GOLD = '#5a4820'
-const MESH_DEMO = '#1a4a3a'
-const INK = '#02060c'
+const MESH_DEMO = '#134a40'
+const INK = '#010609'
 
 /** Concentric shells on one sphere — scaled to fit between side rails */
 const R_INNER = 1.65
 const R_MID = 2.45
-const R_OUTER = 3.15
 const R_NEWS = 3.8
 const R_UPDATES = 4.4
 const R_DEMOS = 5.0
+const R_SITES = 5.45
+const R_CONTAINERS = 5.9
+
+const HERO_REPOS = new Set(['corvex', 'anima', 'neuralvortex', 'drift'])
+const ARCHIVED_REPOS = new Set([
+  'ai-brain',
+  'ai-powered-whatsapp-chatbot',
+  'ai-risk-prediction-',
+  'ai-risk-prediction',
+  'health-tracker-v2',
+  'webcam-sketcher',
+  'cv2-volume-control',
+  'elevyx',
+])
 
 const FALLBACK = [
-  'AI-BRAIN', 'Lexprobe', 'NeuralVortex', 'Health-AI', 'GeoQuant',
-  'Athera', 'Anima', 'text2sql-rag', 'Drone-Vortex-Ring-Simulation',
-  'Propeller-simulator', 'vortex-tracker', 'siddarthb',
+  'Corvex', 'Anima', 'NeuralVortex', 'Drift', 'Lexprobe', 'Health-AI',
+  'GeoQuant', 'Athera', 'text2sql-rag', 'Drone-Vortex-Ring-Simulation',
+  'Propeller-simulator', 'vortex-tracker', 'siddarthb', 'AI-BRAIN',
 ]
+
+function repoKey(name = '') {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+}
+
+function isHeroRepo(name) {
+  return HERO_REPOS.has(repoKey(name))
+}
+
+function isArchivedRepo(repo = {}) {
+  if (repo?.archived) return true
+  return ARCHIVED_REPOS.has(repoKey(repo?.name || repo))
+}
 
 function hash(s = '') {
   let h = 2166136261
@@ -84,45 +119,138 @@ function Line({ a, b, color, opacity }) {
 
 function Core() {
   const glow = useRef()
+  const ring = useRef()
   useFrame(({ clock }) => {
-    if (!glow.current) return
-    const s = 1 + Math.sin(clock.elapsedTime * 1.8) * 0.06
-    glow.current.scale.setScalar(s)
+    const t = clock.elapsedTime
+    if (glow.current) {
+      const s = 1 + Math.sin(t * 2.1) * 0.08
+      glow.current.scale.setScalar(s)
+      glow.current.material.emissiveIntensity = 0.75 + Math.sin(t * 2.4) * 0.25
+    }
+    if (ring.current) ring.current.rotation.z = t * 0.35
   })
   return (
     <group>
       <mesh ref={glow}>
-        <sphereGeometry args={[0.38, 32, 32]} />
+        <sphereGeometry args={[0.4, 32, 32]} />
         <meshStandardMaterial
           color={CORE_WHITE}
           emissive={NODE_LIGHT}
-          emissiveIntensity={0.85}
-          roughness={0.25}
-          metalness={0.2}
+          emissiveIntensity={0.9}
+          roughness={0.22}
+          metalness={0.25}
         />
       </mesh>
       <mesh>
         <sphereGeometry args={[0.18, 20, 20]} />
         <meshBasicMaterial color="#ffffff" />
       </mesh>
-      <WireSphere radius={1.15} color={MESH} opacity={0.12} segments={28} />
+      <mesh ref={ring} rotation={[Math.PI / 2.4, 0.2, 0]}>
+        <torusGeometry args={[0.72, 0.012, 8, 64]} />
+        <meshBasicMaterial color={NODE_LIGHT} transparent opacity={0.45} />
+      </mesh>
+      <WireSphere radius={1.15} color={MESH} opacity={0.14} segments={28} />
     </group>
   )
 }
 
-function Dot({ position, size, color, label, showLabel, labelColor, onSelect, selected, pulsing }) {
+function SparkField({ count = 28 }) {
+  const group = useRef()
+  const sparks = useMemo(
+    () =>
+      Array.from({ length: count }, (_, i) => {
+        const radius = 1.3 + (hash(`spark:${i}`) % 100) / 28
+        return {
+          id: `spark:${i}`,
+          position: fibSphere(i, count, radius),
+          size: 0.02 + (i % 4) * 0.006,
+          color: i % 5 === 0 ? NODE_ACCENT_SOFT : i % 3 === 0 ? NODE_GOLD : NODE_LIGHT,
+          speed: 0.4 + (hash(`spd:${i}`) % 10) / 14,
+          phase: (hash(`ph:${i}`) % 100) / 16,
+        }
+      }),
+    [count],
+  )
+
+  useFrame(({ clock }) => {
+    if (!group.current) return
+    const t = clock.elapsedTime
+    group.current.children.forEach((child, i) => {
+      const spark = sparks[i]
+      if (!spark || !child) return
+      const breathe = 0.55 + Math.sin(t * spark.speed + spark.phase) * 0.45
+      child.scale.setScalar(breathe)
+      child.material.opacity = 0.25 + breathe * 0.45
+    })
+  })
+
+  return (
+    <group ref={group}>
+      {sparks.map((spark) => (
+        <mesh key={spark.id} position={spark.position}>
+          <sphereGeometry args={[spark.size, 8, 8]} />
+          <meshBasicMaterial color={spark.color} transparent opacity={0.5} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function Dot({
+  position,
+  size,
+  color,
+  label,
+  showLabel,
+  labelColor,
+  onSelect,
+  selected,
+  pulsing,
+  hero = false,
+  archived = false,
+  accent = false,
+}) {
   const [hovered, setHovered] = useState(false)
   const active = selected || hovered
   const mesh = useRef()
+  const halo = useRef()
 
   useFrame(({ clock }) => {
+    const t = clock.elapsedTime
     if (!mesh.current) return
-    const pulse = pulsing ? 1 + Math.sin(clock.elapsedTime * 6) * 0.28 : 1
-    mesh.current.scale.setScalar((active ? 1.35 : 1) * pulse)
+    const base = hero ? 1.08 : archived ? 0.92 : 1
+    const pulseAmp = hero ? 0.16 : pulsing ? 0.12 : accent ? 0.1 : 0.04
+    const pulseSpeed = hero ? 2.6 : pulsing ? 3.2 : accent ? 2.2 : 1.4
+    const pulse = base + Math.sin(t * pulseSpeed + (hero ? 0.4 : 0)) * pulseAmp
+    mesh.current.scale.setScalar((active ? 1.32 : 1) * pulse)
+    if (mesh.current.material) {
+      mesh.current.material.emissiveIntensity = hero
+        ? 1.15 + Math.sin(t * 2.8) * 0.25
+        : pulsing
+          ? 1.05
+          : accent
+            ? 0.7 + Math.sin(t * 2.1) * 0.2
+            : active
+              ? 0.75
+              : archived
+                ? 0.18
+                : 0.38
+    }
+    if (halo.current) {
+      halo.current.rotation.z = t * (hero ? 0.8 : 0.35)
+      const hs = 1 + Math.sin(t * 2.2) * 0.08
+      halo.current.scale.setScalar(hs)
+    }
   })
 
   return (
     <group position={position}>
+      {hero ? (
+        <mesh ref={halo} rotation={[Math.PI / 2.6, 0.15, 0]}>
+          <torusGeometry args={[size * 1.85, 0.012, 6, 48]} />
+          <meshBasicMaterial color={color} transparent opacity={0.55} depthWrite={false} />
+        </mesh>
+      ) : null}
       <mesh
         ref={mesh}
         onClick={(e) => {
@@ -139,29 +267,31 @@ function Dot({ position, size, color, label, showLabel, labelColor, onSelect, se
           document.body.style.cursor = 'default'
         }}
       >
-        <sphereGeometry args={[size, 16, 16]} />
+        <sphereGeometry args={[size, hero ? 20 : 16, hero ? 20 : 16]} />
         <meshStandardMaterial
           color={active ? CORE_WHITE : color}
           emissive={color}
-          emissiveIntensity={pulsing ? 1.1 : active ? 0.7 : 0.35}
-          roughness={0.4}
-          metalness={0.25}
+          emissiveIntensity={hero ? 1.2 : pulsing ? 1.05 : accent ? 0.75 : archived ? 0.2 : 0.4}
+          roughness={archived ? 0.65 : 0.35}
+          metalness={archived ? 0.1 : 0.3}
+          transparent={archived}
+          opacity={archived ? 0.72 : 1}
         />
       </mesh>
       {showLabel && label ? (
         <Billboard follow>
           <Text
-            position={[0, size + 0.16, 0]}
-            fontSize={0.13}
+            position={[0, size + (hero ? 0.22 : 0.16), 0]}
+            fontSize={hero ? 0.155 : archived ? 0.11 : 0.13}
             color={labelColor || NODE_LIGHT}
             anchorX="center"
             anchorY="bottom"
-            outlineWidth={0.012}
+            outlineWidth={hero ? 0.016 : 0.012}
             outlineColor={INK}
-            fillOpacity={0.88}
-            maxWidth={2.2}
+            fillOpacity={archived ? 0.55 : hero ? 1 : 0.9}
+            maxWidth={2.4}
           >
-            {label}
+            {hero ? `◆ ${label}` : label}
           </Text>
         </Billboard>
       ) : null}
@@ -172,6 +302,15 @@ function Dot({ position, size, color, label, showLabel, labelColor, onSelect, se
 function buildNodes(graphProjection, repos, hnStories) {
   const repoLookup = new Map((repos || []).map((r) => [r.name, enrichRepo(r)]))
 
+  // Merge graph + store metadata so archived flags survive even if one source is thin.
+  for (const node of graphProjection?.nodes || []) {
+    if (node.type !== 'repo') continue
+    const name = String(node.label || node.id).replace(/^repo:/, '')
+    if (!name) continue
+    const existing = repoLookup.get(name) || { name }
+    repoLookup.set(name, enrichRepo({ ...existing, ...(node.meta || {}), name }))
+  }
+
   let repoNames = (graphProjection?.nodes || [])
     .filter((n) => n.type === 'repo')
     .map((n) => String(n.label || n.id).replace(/^repo:/, ''))
@@ -180,53 +319,81 @@ function buildNodes(graphProjection, repos, hnStories) {
     repoNames = (repos || []).map((r) => r.name).filter(Boolean)
   }
   if (!repoNames.length) repoNames = FALLBACK
-  repoNames = repoNames.slice(0, 24)
+
+  // Keep heroes near the front of the shell, archived toward the end.
+  repoNames = [...new Set(repoNames)].sort((a, b) => {
+    const ah = isHeroRepo(a) ? 0 : isArchivedRepo(repoLookup.get(a) || { name: a }) ? 2 : 1
+    const bh = isHeroRepo(b) ? 0 : isArchivedRepo(repoLookup.get(b) || { name: b }) ? 2 : 1
+    if (ah !== bh) return ah - bh
+    return a.localeCompare(b)
+  }).slice(0, 24)
+
+  const accentRepoIndexes = new Set()
+  repoNames.forEach((name, i) => {
+    if (isHeroRepo(name) || isArchivedRepo(repoLookup.get(name) || { name })) return
+    if (hash(`accent:${name}`) % 7 === 0) accentRepoIndexes.add(i)
+  })
+  // Guarantee a couple of red accents even if hash misses.
+  repoNames.forEach((name, i) => {
+    if (accentRepoIndexes.size >= 3) return
+    if (!isHeroRepo(name) && !isArchivedRepo(repoLookup.get(name) || { name })) accentRepoIndexes.add(i)
+  })
 
   const mid = repoNames.map((name, i) => {
     const data = repoLookup.get(name) || enrichRepo({ name })
+    const hero = isHeroRepo(name)
+    const archived = isArchivedRepo(data)
+    const accent = !hero && !archived && accentRepoIndexes.has(i)
+    const color = hero
+      ? i % 2 === 0
+        ? NODE_HERO
+        : NODE_HERO_ALT
+      : archived
+        ? NODE_ARCHIVED
+        : accent
+          ? NODE_ACCENT
+          : NODE_LIGHT
     return {
       id: `repo:${name}`,
       label: name.length > 18 ? `${name.slice(0, 17)}…` : name,
-      position: fibSphere(i, repoNames.length, R_MID),
-      size: 0.18 + (hash(name) % 8) * 0.01,
-      color: NODE_LIGHT,
+      position: fibSphere(i, repoNames.length, hero ? R_MID - 0.12 : archived ? R_MID + 0.08 : R_MID),
+      size: hero ? 0.28 : archived ? 0.14 : accent ? 0.2 : 0.17 + (hash(name) % 8) * 0.01,
+      color,
+      labelColor: color,
       shell: 'mid',
       showLabel: true,
       type: 'repo',
-      data,
+      hero,
+      archived,
+      accent,
+      data: { ...data, hero, archived },
     }
   })
 
-  const outerCount = 14
-  const outer = Array.from({ length: outerCount }, (_, i) => ({
-    id: `outer:${i}`,
-    label: '',
-    position: fibSphere(i, outerCount, R_OUTER),
-    size: 0.14 + (i % 4) * 0.018,
-    color: NODE_DARK,
-    shell: 'outer',
-    showLabel: false,
-    type: 'node',
-    data: null,
-  }))
-
-  const innerCount = 12
-  const inner = Array.from({ length: innerCount }, (_, i) => ({
-    id: `inner:${i}`,
-    label: '',
-    position: fibSphere(i, innerCount, R_INNER),
-    size: 0.09 + (i % 3) * 0.012,
-    color: NODE_MID,
-    shell: 'inner',
-    showLabel: false,
-    type: 'node',
-    data: null,
-  }))
+  const innerCount = 14
+  const inner = Array.from({ length: innerCount }, (_, i) => {
+    const accent = i % 4 === 0
+    return {
+      id: `inner:${i}`,
+      label: '',
+      position: fibSphere(i, innerCount, R_INNER),
+      size: 0.08 + (i % 3) * 0.014,
+      color: accent ? NODE_ACCENT_SOFT : NODE_MID,
+      shell: 'inner',
+      showLabel: false,
+      type: 'node',
+      accent,
+      data: null,
+    }
+  })
 
   const newsRaw = []
   const updateRaw = []
   const stories = hnStories || []
-  const focusRepos = mid.slice(0, 6)
+  const focusRepos = [
+    ...mid.filter((n) => n.hero),
+    ...mid.filter((n) => !n.hero && !n.archived),
+  ].slice(0, 6)
   const seenNews = new Set()
 
   focusRepos.forEach((repoNode) => {
@@ -295,8 +462,55 @@ function buildNodes(graphProjection, repos, hnStories) {
       }
     })
 
-  const main = [...inner, ...mid, ...outer]
-  return { mid, main, news, updates, demos: demoNodes }
+  const siteNodes = (graphProjection?.nodes || [])
+    .filter((n) => n.type === 'site')
+    .slice(0, 18)
+    .map((n, i, all) => {
+      const status = n.meta?.status || 'unknown'
+      return {
+        id: n.id,
+        label: `WEB · ${String(n.label || 'site').slice(0, 14)}`,
+        position: fibSphere(i, Math.max(all.length, 1), R_SITES),
+        size: 0.17,
+        color: status === 'up' ? NODE_ONLINE : status === 'down' ? NODE_DOWN : NODE_DEGRADED,
+        labelColor: status === 'up' ? NODE_ONLINE : status === 'down' ? NODE_DOWN : NODE_DEGRADED,
+        shell: 'sites',
+        showLabel: true,
+        type: 'site',
+        data: n.meta || n,
+      }
+    })
+
+  const containerNodes = (graphProjection?.nodes || [])
+    .filter((n) => n.type === 'container')
+    .slice(0, 22)
+    .map((n, i, all) => {
+      const state = n.meta?.state
+      const health = n.meta?.health
+      const color =
+        state !== 'running'
+          ? NODE_DEGRADED
+          : health === 'unhealthy'
+            ? NODE_DOWN
+            : health === 'healthy'
+              ? NODE_ONLINE
+              : NODE_CONTAINER
+      return {
+        id: n.id,
+        label: `CTR · ${String(n.label || 'container').slice(0, 14)}`,
+        position: fibSphere(i, Math.max(all.length, 1), R_CONTAINERS),
+        size: 0.15,
+        color,
+        labelColor: color,
+        shell: 'containers',
+        showLabel: true,
+        type: 'container',
+        data: n.meta || n,
+      }
+    })
+
+  const main = [...inner, ...mid]
+  return { mid, main, news, updates, demos: demoNodes, sites: siteNodes, containers: containerNodes }
 }
 
 function shellLinks(nodes, radius, maxLinks = 28) {
@@ -316,7 +530,8 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
   const newsLayer = useRef()
   const updatesLayer = useRef()
   const demosLayer = useRef()
-  const { mid, main, news, updates, demos } = useMemo(
+  const infraLayer = useRef()
+  const { mid, main, news, updates, demos, sites, containers } = useMemo(
     () => buildNodes(graphProjection, repos, hnStories),
     [graphProjection, repos, hnStories],
   )
@@ -326,7 +541,7 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
     const set = new Set()
     for (const p of graphProjection?.pulses || []) {
       const age = typeof p.ts === 'number' ? now - p.ts : 0
-      if (age >= 0 && age < 45) {
+      if (age >= 0 && age < 8) {
         if (p.node_id) set.add(String(p.node_id))
         // Also pulse core on any recent bus event
         set.add('jarvis')
@@ -352,7 +567,7 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
 
   useFrame((_, dt) => {
     if (root.current) {
-      if (spinEnabled) root.current.rotation.y += dt * 0.045
+      if (spinEnabled) root.current.rotation.y += dt * 0.055
       const ext = rotateRef?.current
       if (ext) {
         root.current.rotation.y += (ext.yaw || 0) * dt * 2.2
@@ -360,9 +575,10 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         root.current.rotation.x = Math.max(-0.7, Math.min(0.7, root.current.rotation.x))
       }
     }
-    if (newsLayer.current && spinEnabled) newsLayer.current.rotation.y -= dt * 0.018
-    if (updatesLayer.current && spinEnabled) updatesLayer.current.rotation.y += dt * 0.012
-    if (demosLayer.current && spinEnabled) demosLayer.current.rotation.y -= dt * 0.01
+    if (newsLayer.current && spinEnabled) newsLayer.current.rotation.y -= dt * 0.022
+    if (updatesLayer.current && spinEnabled) updatesLayer.current.rotation.y += dt * 0.016
+    if (demosLayer.current && spinEnabled) demosLayer.current.rotation.y -= dt * 0.012
+    if (infraLayer.current && spinEnabled) infraLayer.current.rotation.y += dt * 0.01
   })
 
   const pick = (n) =>
@@ -392,30 +608,39 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         labelColor={n.labelColor}
         showLabel={n.showLabel}
         selected={selectedId === n.id}
-        pulsing={pulseIds.has(n.id) || (n.type === 'repo' && pulseIds.has(`repo:${n.label}`))}
+        hero={Boolean(n.hero)}
+        archived={Boolean(n.archived)}
+        accent={Boolean(n.accent)}
+        pulsing={
+          Boolean(n.hero) ||
+          pulseIds.has(n.id) ||
+          (n.type === 'repo' && pulseIds.has(`repo:${n.label}`))
+        }
         onSelect={() => pick(n)}
       />
     ))
 
   return (
     <group ref={root}>
-      <ambientLight intensity={0.4} color="#b0d4ff" />
-      <pointLight position={[0, 0, 0]} intensity={1.1} distance={20} color={NODE_LIGHT} />
-      <pointLight position={[4, 3, 5]} intensity={0.35} distance={22} color={NODE_NEWS} />
-      <pointLight position={[-3, -2, 4]} intensity={0.3} distance={22} color={NODE_GOLD} />
-      <pointLight position={[5, -3, 3]} intensity={0.25} distance={22} color={NODE_DEMO} />
-      <pointLight position={[6, 5, 4]} intensity={0.4} distance={28} color="#ffffff" />
+      <ambientLight intensity={0.42} color="#b0d4ff" />
+      <pointLight position={[0, 0, 0]} intensity={1.25} distance={20} color={NODE_LIGHT} />
+      <pointLight position={[4, 3, 5]} intensity={0.4} distance={22} color={NODE_NEWS} />
+      <pointLight position={[-3, -2, 4]} intensity={0.35} distance={22} color={NODE_GOLD} />
+      <pointLight position={[5, -3, 3]} intensity={0.3} distance={22} color={NODE_ACCENT_SOFT} />
+      <pointLight position={[6, 5, 4]} intensity={0.45} distance={28} color="#ffffff" />
 
       <Core />
-      <WireSphere radius={R_INNER} color={MESH} opacity={0.07} segments={32} />
-      <WireSphere radius={R_MID} color={MESH} opacity={0.11} segments={40} />
-      <WireSphere radius={R_OUTER} color={MESH_DIM} opacity={0.14} segments={28} />
+      <SparkField count={32} />
+      <WireSphere radius={R_INNER} color={MESH} opacity={0.09} segments={32} />
+      <WireSphere radius={R_MID} color={MESH} opacity={0.13} segments={40} />
       <WireSphere radius={R_NEWS} color={MESH_NEWS} opacity={0.16} segments={30} />
       <WireSphere radius={R_UPDATES} color={MESH_GOLD} opacity={0.14} segments={26} />
       <WireSphere radius={R_DEMOS} color={MESH_DEMO} opacity={0.14} segments={24} />
+      <WireSphere radius={R_SITES} color={NODE_ONLINE} opacity={0.1} segments={24} />
+      <WireSphere radius={R_CONTAINERS} color={NODE_CONTAINER} opacity={0.09} segments={22} />
 
       {midLinks.map(([a, b], i) => (
-        <Line key={`m-${i}`} a={a} b={b} color={MESH} opacity={0.22} />
+        <Line key={`m-${i}`} a={a} b={b} color={MESH} opacity={0.26} />
       ))}
 
       {main.map((n) => (
@@ -423,8 +648,8 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
           key={`r-${n.id}`}
           a={[0, 0, 0]}
           b={n.position}
-          color={n.shell === 'outer' ? LINE_OUTER : MESH_DIM}
-          opacity={n.shell === 'outer' ? 0.45 : 0.2}
+          color={n.hero ? n.color : n.accent ? NODE_ACCENT : n.archived ? NODE_ARCHIVED : MESH_DIM}
+          opacity={n.hero ? 0.45 : n.accent ? 0.28 : n.archived ? 0.12 : 0.2}
         />
       ))}
 
@@ -459,6 +684,17 @@ function Scene({ graphProjection, repos, hnStories, selectedId, onSelect, spinEn
         ))}
         {renderDots(demos)}
       </group>
+
+      <group ref={infraLayer}>
+        {sites.map((n) => (
+          <Line key={`sr-${n.id}`} a={[0, 0, 0]} b={n.position} color={n.color} opacity={0.28} />
+        ))}
+        {containers.map((n) => (
+          <Line key={`cr-${n.id}`} a={[0, 0, 0]} b={n.position} color={n.color} opacity={0.18} />
+        ))}
+        {renderDots(sites)}
+        {renderDots(containers)}
+      </group>
     </group>
   )
 }
@@ -482,14 +718,22 @@ function GraphHud({ gestureOn, gesture, spinEnabled, inset = {} }) {
         fontFamily: 'var(--font-mono)',
         fontSize: 11,
         color: 'var(--text-dim)',
-        background: 'rgba(0,8,16,0.82)',
-        border: '1px solid rgba(0,200,255,0.12)',
+        background: 'rgba(2,10,20,0.85)',
+        border: '1px solid rgba(0,217,255,0.2)',
         padding: '8px 10px',
-        borderRadius: 4,
+        borderRadius: 2,
         pointerEvents: 'none',
         lineHeight: 1.6,
+        boxShadow: 'inset 0 0 14px rgba(0,217,255,0.05)',
+        clipPath: 'polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)',
       }}
     >
+      <div style={{ color: 'var(--cyan)', letterSpacing: '0.12em', marginBottom: 4 }}>
+        ◆ HERO · CORVEX / ANIMA / NEURALVORTEX / DRIFT
+      </div>
+      <div style={{ opacity: 0.75, marginBottom: 6 }}>
+        ARCHIVED DIM · ACCENT RED · LIVE SPARKS
+      </div>
       {gestureOn ? (
         <>
           HAND · {source} · {gesture?.hands || 0}/2 · {(gesture?.gesture || 'none').toUpperCase()}
@@ -520,7 +764,7 @@ function GraphHud({ gestureOn, gesture, spinEnabled, inset = {} }) {
           <br />
           KEYS · ←→↑↓ · +/− · 1–9 · R reset · S spin
           <br />
-          LAYERS · repos · purple news · gold updates · jade demos
+          LAYERS · repos · blue news · gold updates · teal demos
         </>
       )}
       <br />
@@ -694,7 +938,7 @@ export default function BrainGraph({ hudInset } = {}) {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Canvas
-        camera={{ position: [0, 0.6, 13.5], fov: 38, near: 0.1, far: 140 }}
+        camera={{ position: [0, 0.6, 15.5], fov: 38, near: 0.1, far: 140 }}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
         onPointerMissed={() => setSelectedNode(null)}
