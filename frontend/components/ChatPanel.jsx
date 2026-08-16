@@ -376,6 +376,10 @@ export default function ChatPanel() {
   const [thinking, setThinking] = useState(false)
   const chatHistory = useJarvisStore((s) => s.chatHistory)
   const sendChat = useJarvisStore((s) => s.sendChat)
+  const dossier = useJarvisStore((s) => s.dossier)
+  const setShellMode = useJarvisStore((s) => s.setShellMode)
+  const setActivePanel = useJarvisStore((s) => s.setActivePanel)
+  const setLayoutMode = useJarvisStore((s) => s.setLayoutMode)
   const setVoiceState = useJarvisStore((s) => s.setVoiceState)
   const scrollRef = useRef()
 
@@ -399,7 +403,7 @@ export default function ChatPanel() {
       speaker = createStreamingSpeaker({
         preferBrowser: true,
         lang: 'en-US',
-        rate: 1.08,
+        rate: 1.32,
         pitch: 1,
         voiceMatchers: AMERICAN_VOICE_MATCHERS,
         onStart: () => setVoiceState('speaking'),
@@ -458,6 +462,20 @@ export default function ChatPanel() {
           ))}
         </div>
       </div>
+
+      {dossier?.topic ? (
+        <button
+          type="button"
+          className="dossier-strip"
+          onClick={() => {
+            setShellMode('lab')
+            setLayoutMode('lab')
+            setActivePanel('intel')
+          }}
+        >
+          DOSSIER READY · {dossier.topic} · OPEN INTEL
+        </button>
+      ) : null}
 
       <div ref={scrollRef} className="scroll-area" style={{ flex: 1, padding: '18px', minHeight: 0 }}>
         {chatHistory.length === 0 && (

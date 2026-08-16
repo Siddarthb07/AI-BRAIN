@@ -172,7 +172,7 @@ export function WakeRuntime() {
           browserMaxChars: SPEECH_MAX_CHARS,
           browserChunkSize: SPEECH_CHUNK,
           lang: 'en-US',
-          rate: 1.08,
+          rate: 1.32,
           voiceMatchers: AMERICAN_VOICE_MATCHERS,
         })
         if (!ok) setStatusMsg('SPEECH FAILED — check browser voice')
@@ -262,7 +262,7 @@ export function WakeRuntime() {
         try {
           const speaker = createStreamingSpeaker({
             lang: 'en-US',
-            rate: 1.08,
+            rate: 1.32,
             voiceMatchers: AMERICAN_VOICE_MATCHERS,
             onStart: () => {
               speakingRef.current = true
@@ -368,7 +368,7 @@ export function WakeRuntime() {
             setStatusMsg(`THINKING → ${routed.chat.slice(0, 36)}…`)
             const speaker = createStreamingSpeaker({
               lang: 'en-US',
-              rate: 1.08,
+              rate: 1.32,
               voiceMatchers: AMERICAN_VOICE_MATCHERS,
               onStart: () => {
                 speakingRef.current = true
@@ -404,7 +404,7 @@ export function WakeRuntime() {
       try {
         const speaker = createStreamingSpeaker({
           lang: 'en-US',
-          rate: 1.08,
+          rate: 1.32,
           voiceMatchers: AMERICAN_VOICE_MATCHERS,
           onStart: () => {
             speakingRef.current = true
@@ -694,7 +694,7 @@ export default function WakePanel() {
         <br />
         Session: {gestureSession?.running ? gestureSession?.source || 'running' : 'idle'}
         <br />
-        API: {API_BASE}/gestures
+        API: {resolveApiBase()}/gestures
       </div>
     </div>
   )

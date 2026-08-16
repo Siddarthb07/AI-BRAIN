@@ -63,6 +63,16 @@ async def _ingest_repo_bg(owner: str, repo: str, deep: bool = True):
         }
         store.add_repo(enriched)
 
+        from services import intel as intel_svc
+
+        inv = intel_svc.apply_inventory_to_repo(owner, repo, chunks)
+        enriched = {
+            **enriched,
+            "key_deps": inv.get("key_deps") or {},
+            "required_env": inv.get("required_env") or [],
+        }
+        store.add_repo(enriched)
+
         for chunk in chunks:
             await rag.add_document(chunk["chunk_text"], {"source": chunk["source"],
                 "type": "code_file", "name": repo, "owner": owner,

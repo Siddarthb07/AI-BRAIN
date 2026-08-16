@@ -91,7 +91,7 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8001/calendar/google/callback}
-      - GOOGLE_FRONTEND_URL=${GOOGLE_FRONTEND_URL:-http://localhost:5050}
+      - GOOGLE_FRONTEND_URL=${GOOGLE_FRONTEND_URL:-http://127.0.0.1:5055}
       - GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID:-primary}
       - GOOGLE_CALENDAR_SYNC_TTL=${GOOGLE_CALENDAR_SYNC_TTL:-300}
       - GOOGLE_CALENDAR_MAX_EVENTS=${GOOGLE_CALENDAR_MAX_EVENTS:-8}
@@ -110,6 +110,14 @@ services:
         condition: service_healthy
       docker-proxy:
         condition: service_started
+    # Ensure docker SDK is present even when the image predates requirements.txt updates
+    # (avoids empty container shell on BrainGraph after --no-build recreates).
+    command:
+      [
+        "sh",
+        "-c",
+        "pip install -q docker==7.1.0 && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+      ]
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -121,10 +129,13 @@ services:
       dockerfile: Dockerfile
     container_name: jarvis-frontend
     ports:
-      - "5050:3000"
+      # Use 5055 — Windows often maps localhost:5050 to a broken IPv6/WSL relay
+      # that returns ERR_CONNECTION_REFUSED. Prefer http://127.0.0.1:5055
+      - "5055:3000"
     environment:
-      # Browser calls host-mapped API directly (camera/mic work on http://localhost)
-      - NEXT_PUBLIC_API_URL=http://localhost:8001
+      # Prefer same-origin /backend proxy — Docker Desktop's localhost:8001 publish
+      # is flaky on Windows (IPv6 + long Ollama probe timeouts looked like "backend down").
+      - NEXT_PUBLIC_API_URL=/backend
       # Same-origin /backend proxy inside the Next container → FastAPI service
       - JARVIS_BACKEND_URL=http://backend:8000
     volumes:

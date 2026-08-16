@@ -1,7 +1,7 @@
 'use client'
 import { useMemo } from 'react'
 import { useJarvisStore } from '../app/store'
-import { enrichRepo, rankRelatedRepos, rankRelevantNews, repoUpdateItems, scoreNewsForRepo } from '../lib/knowledge'
+import { enrichRepo, rankRelatedRepos, rankRelevantNews, repoLibNames, repoUpdateItems, scoreNewsForRepo } from '../lib/knowledge'
 
 const TYPE_COLORS = {
   repo: 'var(--green)',
@@ -281,6 +281,24 @@ export default function NodePanel() {
               </div>
             )}
           </div>
+
+          <Section title="X-RAY">
+            <div className="xray-orbit">
+              {repoLibNames(repoData).slice(0, 10).map((lib) => (
+                <span key={lib} className="xray-chip">
+                  {lib}
+                </span>
+              ))}
+              {(repoData.required_env || []).slice(0, 6).map((env) => (
+                <span key={env} className="xray-chip xray-env">
+                  {env}
+                </span>
+              ))}
+              {!repoLibNames(repoData).length && !(repoData.required_env || []).length ? (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No stack lock yet — ingest deep.</div>
+              ) : null}
+            </div>
+          </Section>
 
           {(repoData.derivedTopics || []).length > 0 && (
             <Section title="TOPICS">

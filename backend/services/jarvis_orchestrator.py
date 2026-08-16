@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
-from services import action_queue, chat_history, event_bus, google_calendar, llm, rag, store, vault
+from services import action_queue, chat_history, event_bus, google_calendar, hardware, llm, rag, store, vault, world_events
 from services.demo_builder import build_demo, is_build_intent
 from services.llm import LLMOfflineError
 from services.research import extract_topic, is_research_intent, research_topic
@@ -27,11 +27,16 @@ Hard rules:
 - Timezone: Asia/Kolkata (IST). Use Current datetime from context for "today"/"now".
 - When PROJECT cards appear, treat them as authoritative. Do not invent "unknown language" when fields exist.
 - If a Selected/focus repo is listed, that repo is the subject of this turn.
+- Hardware flight controllers are fixed: quad = KK2.1.5, hex = DJI NAZA-M Lite. Never swap them.
 
 ACTIONS JSON — only when the user asked you to do something durable (save, sync, research, build). Most replies need ZERO actions.
 When needed, end with a JSON block on its own line:
 ACTIONS: [{"type":"save_note|sync_vault|search_vault|write_brief|open_in_explorer|build_demo|research_report|web_search","label":"...","params":{}}]
-Home automation is disabled — never propose house_service."""
+Home automation is disabled — never propose house_service.
+
+UI JSON — show map / project / drone immediately (no confirm). Own line:
+UI: [{"type":"ui_zoom_map","params":{"region":"india"}},{"type":"ui_open_project","params":{"name":"Anima"}},{"type":"ui_show_hardware","params":{"id":"hex"}}]
+Regions: world, india, ukraine, gaza, sudan, taiwan, usa, europe, china. Hardware: quad, hex."""
 
 
 def _system_prompt_with_time() -> str:
@@ -47,6 +52,65 @@ ALLOWED_ACTIONS = {
     "research_report",
     "web_search",
 }
+
+UI_ACTIONS = {"ui_zoom_map", "ui_open_project", "ui_show_hardware", "ui_clear_stage", "ui_show_weather", "ui_go_home", "ui_map_scale", "ui_open_map"}
+
+
+def infer_ui_commands(message: str, repos: list[dict] | None = None) -> list[dict[str, Any]]:
+    text = (message or "").lower()
+    out: list[dict[str, Any]] = []
+    if any(p in text for p in ("indian map", "india map", "map of india", "zoom india", "open india")):
+        out.append({"type": "ui_zoom_map", "params": {"region": "india"}})
+    elif "world map" in text or "globe" in text:
+        out.append({"type": "ui_zoom_map", "params": {"region": "world"}})
+    else:
+        for region in world_events.REGIONS:
+            if region in text and ("map" in text or "zoom" in text or "show" in text):
+                out.append({"type": "ui_zoom_map", "params": {"region": region}})
+                break
+    if any(p in text for p in ("hexcopter", "hexacopter", "naza", "f550", "hex drone")):
+        out.append({"type": "ui_show_hardware", "params": {"id": "hex"}})
+    if any(p in text for p in ("quadcopter", "quad drone", "kk2", "kk 2")):
+        out.append({"type": "ui_show_hardware", "params": {"id": "quad"}})
+    if "weather" in text or "bangalore" in text and "temp" in text:
+        out.append({"type": "ui_show_weather", "params": {}})
+    if any(p in text for p in ("go home", "close map", "clear hud")):
+        out.append({"type": "ui_go_home", "params": {}})
+    if "zoom in" in text:
+        out.append({"type": "ui_map_scale", "params": {"dir": 1}})
+    if "zoom out" in text:
+        out.append({"type": "ui_map_scale", "params": {"dir": -1}})
+    if any(p in text for p in ("open map", "show map", "world map", "globe")):
+        out.append({"type": "ui_open_map", "params": {}})
+    for repo in repos or store.get_repos():
+        name = str(repo.get("name") or "").strip()
+        if not name or len(name) < 3:
+            continue
+        if name.lower() in text and any(p in text for p in ("open", "project", "blueprint", "show")):
+            out.append({"type": "ui_open_project", "params": {"name": name}})
+            break
+    return out
+
+
+def _parse_ui_block(raw: str) -> tuple[str, list[dict[str, Any]]]:
+    marker = "UI:"
+    if marker not in raw:
+        return raw.strip(), []
+    reply, _, tail = raw.partition(marker)
+    blob = tail.strip()
+    if "ACTIONS:" in blob:
+        blob = blob.split("ACTIONS:")[0].strip()
+    try:
+        cmds = json.loads(blob)
+        if not isinstance(cmds, list):
+            cmds = []
+    except json.JSONDecodeError:
+        cmds = []
+    cleaned = []
+    for item in cmds:
+        if isinstance(item, dict) and item.get("type") in UI_ACTIONS:
+            cleaned.append({"type": item["type"], "params": item.get("params") or {}})
+    return reply.strip(), cleaned
 
 
 def _resolve_mentioned_repos(message: str, repos: list[dict]) -> list[dict]:
@@ -282,6 +346,7 @@ async def assemble_context(
         f"Goals={', '.join(ctx.get('daily_goals', []))}",
         f"Indexed repos:\n{repo_catalog}",
         f"Vault: {vault_st.get('vault_path')} ({vault_st.get('note_count', 0)} notes)",
+        hardware.memory_block(),
     ]
     if project_parts:
         parts.append("PROJECT CARDS (authoritative):\n" + "\n\n".join(project_parts))
@@ -289,6 +354,18 @@ async def assemble_context(
         parts.append(calendar_context.strip())
     if rag_context:
         parts.append(f"Relevant knowledge:\n{rag_context}")
+
+    low = (message or "").lower()
+    if any(k in low for k in ("drone", "quad", "hex", "naza", "kk2", "f550", "war", "india map", "world map")):
+        try:
+            hits = await web_search_svc.search_web(message, max_results=5)
+            if hits:
+                lines = "\n".join(
+                    f"- {h.get('title')} ({h.get('url')})" for h in hits if h.get("title")
+                )
+                parts.append(f"LIVE WEB HITS (verify against HARDWARE block for FC names):\n{lines}")
+        except Exception:
+            pass
 
     return "\n\n".join(parts), citations
 
@@ -371,7 +448,9 @@ async def run_chat(
         raw = str(exc)
         llm_offline = True
 
-    reply, actions = _parse_actions(raw, sid) if not llm_offline else (raw, [])
+    reply, ui_from_model = _parse_ui_block(raw) if not llm_offline else (raw, [])
+    reply, actions = _parse_actions(reply, sid) if not llm_offline else (raw, [])
+    ui = ui_from_model + infer_ui_commands(message, store.get_repos())
     if actions:
         await event_bus.publish("action.pending", {"count": len(actions), "session_id": sid})
 
@@ -380,7 +459,7 @@ async def run_chat(
         sid,
         "assistant",
         reply,
-        meta={"citations": citations, "actions": [a["id"] for a in actions], "llm_offline": llm_offline},
+        meta={"citations": citations, "actions": [a["id"] for a in actions], "llm_offline": llm_offline, "ui": ui},
     )
 
     return {
@@ -388,6 +467,7 @@ async def run_chat(
         "session_id": sid,
         "citations": citations,
         "actions": actions,
+        "ui": ui,
         "sources": len(citations),
         "context_used": bool(context_str),
         "llm_offline": llm_offline,
@@ -585,7 +665,18 @@ async def run_chat_stream(
 
     raw = "".join(chunks)
     raw = llm.strip_reasoning_noise(raw)
-    reply, actions = _parse_actions(raw, sid) if not llm_offline else (raw, [])
+    reply, ui_from_model = _parse_ui_block(raw) if not llm_offline else (raw, [])
+    reply, actions = _parse_actions(reply, sid) if not llm_offline else (raw, [])
+    ui = ui_from_model + infer_ui_commands(message, store.get_repos())
+    seen = set()
+    deduped = []
+    for cmd in ui:
+        key = (cmd.get("type"), json.dumps(cmd.get("params") or {}, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cmd)
+    ui = deduped
     if actions:
         await event_bus.publish("action.pending", {"count": len(actions), "session_id": sid})
 
@@ -601,6 +692,7 @@ async def run_chat_stream(
         "type": "meta",
         "citations": citations,
         "actions": actions,
+        "ui": ui,
         "llm_offline": llm_offline,
         "context_used": bool(context_str),
     }

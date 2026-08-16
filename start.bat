@@ -81,11 +81,12 @@ if errorlevel 1 (
 echo.
 echo [OK] JARVIS is starting up.
 echo.
-echo   Frontend : http://localhost:5050
-echo   Backend  : http://localhost:8001
-echo   API Docs : http://localhost:8001/docs
-echo   Qdrant   : http://localhost:6335/dashboard
+echo   Frontend : http://127.0.0.1:5055
+echo   Backend  : http://127.0.0.1:8001
+echo   API Docs : http://127.0.0.1:8001/docs
+echo   Qdrant   : http://127.0.0.1:6335/dashboard
 echo.
+echo   Tip: open 127.0.0.1 (not localhost) on Windows — IPv6 localhost can refuse Docker ports.
 echo [TIP] First run: click "+ GITHUB" in the UI and enter your GitHub username.
 echo [TIP] Then click the VOICE tab and press "HOLD TO SPEAK" to talk to JARVIS.
 echo.

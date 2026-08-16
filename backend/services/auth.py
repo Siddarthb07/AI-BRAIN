@@ -38,7 +38,7 @@ class JarvisAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if request.method in SAFE_METHODS and path.startswith(
-            ("/graph", "/house/entities", "/house/status", "/gestures", "/demos", "/demos-static", "/research/status", "/vision/status")
+            ("/graph", "/house/entities", "/house/status", "/gestures", "/demos", "/demos-static", "/research/status", "/vision/status", "/intel/armory")
         ):
             return await call_next(request)
 

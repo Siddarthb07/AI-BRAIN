@@ -5,7 +5,7 @@ export async function requestGestureCamera() {
     throw new Error('Camera only works in the browser')
   }
   if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-    throw new Error('Camera needs HTTPS or localhost — open http://localhost:5050')
+    throw new Error('Camera needs HTTPS or localhost — open http://127.0.0.1:5055')
   }
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Camera API unavailable — use Chrome or Edge')

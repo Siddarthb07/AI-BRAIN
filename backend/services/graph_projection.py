@@ -40,7 +40,11 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
             )
             repo_id = f"repo:{site.get('repo')}"
             edges.append({"source": repo_id, "target": sid, "kind": "deployment", "weight": 1.3})
-        for container in infra_monitor.containers()[:30]:
+        containers = infra_monitor.containers()
+        running = [c for c in containers if c.get("state") == "running"]
+        # Prefer live runtimes on the brain shell; fall back to a short exited sample.
+        container_slice = (running or containers)[:12]
+        for container in container_slice:
             cid = f"container:{container.get('id')}"
             nodes.append(
                 {
@@ -66,6 +70,8 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
                         "topics": repo.get("topics") or [],
                         "archived": bool(repo.get("archived")),
                         "url": repo.get("url"),
+                        "key_deps": list((repo.get("key_deps") or {}).keys())[:16],
+                        "required_env": repo.get("required_env") or [],
                     },
                 }
             )
@@ -75,6 +81,30 @@ def build_projection(layers: list[str] | None = None, limit: int = 100) -> dict[
                 if not any(n["id"] == tid for n in nodes):
                     nodes.append({"id": tid, "type": "topic", "label": str(topic), "meta": {}})
                 edges.append({"source": rid, "target": tid, "kind": "related", "weight": 0.6})
+
+        repo_slice = [r for r in store.get_repos()[:40] if r.get("name")]
+        def _libs(r):
+            deps = r.get("key_deps") or {}
+            if isinstance(deps, dict) and deps:
+                return set(str(k).lower() for k in deps)
+            return {str(x).lower() for x in (r.get("key_imports") or [])[:12]}
+
+        for i, ra in enumerate(repo_slice):
+            da = _libs(ra)
+            if not da:
+                continue
+            for rb in repo_slice[i + 1 :]:
+                shared = da & _libs(rb)
+                if len(shared) >= 2:
+                    edges.append(
+                        {
+                            "source": f"repo:{ra.get('name')}",
+                            "target": f"repo:{rb.get('name')}",
+                            "kind": "library",
+                            "weight": min(2.0, 0.4 * len(shared)),
+                            "libs": sorted(shared)[:6],
+                        }
+                    )
 
     if "news" in wanted:
         for i, story in enumerate(store.get_hn_stories()[:12]):

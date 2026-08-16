@@ -46,7 +46,7 @@ export default function GlobalVoicePTT() {
             preferBrowser: true,
             browserOnly: true,
             lang: 'en-US',
-            rate: 1.05,
+            rate: 1.32,
             voiceMatchers: AMERICAN_VOICE_MATCHERS,
           })
           return
@@ -60,14 +60,14 @@ export default function GlobalVoicePTT() {
               preferBrowser: true,
               browserOnly: true,
               lang: 'en-US',
-              rate: 1.08,
+              rate: 1.32,
               voiceMatchers: AMERICAN_VOICE_MATCHERS,
             })
           }
           if (routed.streamChat && routed.chat) {
             const speaker = createStreamingSpeaker({
               lang: 'en-US',
-              rate: 1.08,
+              rate: 1.32,
               voiceMatchers: AMERICAN_VOICE_MATCHERS,
               onStart: () => setVoiceState('speaking'),
               onEnd: () => setVoiceState('idle'),
@@ -84,7 +84,7 @@ export default function GlobalVoicePTT() {
 
         const speaker = createStreamingSpeaker({
           lang: 'en-US',
-          rate: 1.08,
+          rate: 1.32,
           voiceMatchers: AMERICAN_VOICE_MATCHERS,
           onStart: () => setVoiceState('speaking'),
           onEnd: () => setVoiceState('idle'),

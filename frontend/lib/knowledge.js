@@ -256,3 +256,31 @@ export function repoUpdateItems(repo = {}, limit = 3) {
 export function repoFyiItems(repo = {}, limit = 3) {
   return repoUpdateItems(repo, limit).map((u) => u.text)
 }
+
+export function repoLibNames(repo = {}) {
+  const deps = repo.key_deps
+  if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
+    const keys = Object.keys(deps)
+    if (keys.length) return keys.map((k) => String(k).toLowerCase())
+  }
+  if (Array.isArray(deps) && deps.length) return deps.map((k) => String(k).toLowerCase())
+  const imports = (repo.key_imports || []).map((k) => String(k).toLowerCase()).filter(Boolean)
+  if (imports.length) return imports
+  const extra = []
+  const blob = `${repo.language || ''} ${(repo.topics || []).join(' ')} ${(repo.patterns || []).join(' ')}`.toLowerCase()
+  for (const lib of ['fastapi', 'flask', 'django', 'qdrant', 'react', 'next', 'numpy', 'openai', 'groq', 'torch']) {
+    if (blob.includes(lib)) extra.push(lib)
+  }
+  return extra
+}
+
+export function libTint(name = '') {
+  const n = String(name).toLowerCase()
+  if (n.includes('fast')) return '#00d4ff'
+  if (n.includes('qdrant') || n.includes('vector')) return '#9af6ff'
+  if (n.includes('groq')) return '#ff4d6d'
+  if (n.includes('react') || n.includes('next')) return '#61dafb'
+  if (n.includes('flask') || n.includes('django')) return '#ffb800'
+  if (n.includes('torch') || n.includes('numpy')) return '#4dabf7'
+  return '#7fdfff'
+}

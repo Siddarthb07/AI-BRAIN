@@ -2,6 +2,8 @@
 
 import { Suspense, lazy, useEffect } from 'react'
 import { useJarvisStore } from './store'
+import { llmOnline } from '../lib/health'
+import { hashForSnapshot, parseHash } from '../lib/hashNav'
 import HUD from '../components/HUD'
 import AppShell from '../components/shell/AppShell'
 import ChatPanel from '../components/ChatPanel'
@@ -14,6 +16,7 @@ import DemoPanel from '../components/DemoPanel'
 import LocalIngestPanel from '../components/LocalIngestPanel'
 import NodePanel from '../components/NodePanel'
 import DashboardPanel from '../components/DashboardPanel'
+import IntelPanel from '../components/IntelPanel'
 import VisionPanel from '../components/VisionPanel'
 import WakePanel, { WakeRuntime } from '../components/WakePanel'
 import GestureRuntime from '../components/GestureRuntime'
@@ -22,9 +25,26 @@ import VisionCaptureRuntime from '../components/VisionCaptureRuntime'
 import HudOverlay from '../components/jarvis/HudOverlay'
 import JarvisBackground from '../components/jarvis/JarvisBackground'
 import BootSequence from '../components/jarvis/BootSequence'
+import WorldStage from '../components/WorldStage'
+import BrainGraph from '../components/BrainGraph'
 
-const BrainGraph = lazy(() => import('../components/BrainGraph'))
-const InfraPanel = lazy(() => import('../components/InfraPanel'))
+function lazyWithRetry(factory, retries = 2) {
+  return lazy(async () => {
+    let lastError
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await factory()
+      } catch (error) {
+        lastError = error
+        // ChunkLoadError / transient Docker relay blips — brief backoff then retry.
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+      }
+    }
+    throw lastError
+  })
+}
+
+const InfraPanel = lazyWithRetry(() => import('../components/InfraPanel'))
 
 const SHELL_RAIL = [
   { id: 'dashboard', label: 'Dash' },
@@ -41,6 +61,7 @@ const WORK_RAIL = [
 ]
 
 const LAB_RAIL = [
+  { id: 'intel', label: 'Intel' },
   { id: 'demos', label: 'Demos' },
   { id: 'studio', label: 'Studio' },
   { id: 'ingest', label: 'Ingest' },
@@ -165,11 +186,15 @@ export default function Page() {
   const fetchGraph = useJarvisStore((s) => s.fetchGraph)
   const fetchContext = useJarvisStore((s) => s.fetchContext)
   const fetchInfraStatus = useJarvisStore((s) => s.fetchInfraStatus)
+  const fetchArmory = useJarvisStore((s) => s.fetchArmory)
+  const applyUiCommand = useJarvisStore((s) => s.applyUiCommand)
+  const stageProject = useJarvisStore((s) => s.stageProject)
+  const stageHardware = useJarvisStore((s) => s.stageHardware)
+  const mapOpen = useJarvisStore((s) => s.mapOpen)
 
   const nodeCount = (repos?.length || 0) + (vaultNotes?.length || 0) + (knowledgeDocs || 0)
   const showMiniMap = shellMode === 'work' && nodeCount > 0 && activePanel === 'chat'
-  const showNodePanel =
-    Boolean(selectedNode) && (shellMode === 'dashboard' || (shellMode === 'lab' && activePanel === 'graph'))
+  const showNodePanel = Boolean(selectedNode) && shellMode === 'lab' && activePanel === 'graph'
 
   useEffect(() => {
     checkBackendHealth({ silent: true, repairStatus: true })
@@ -182,7 +207,7 @@ export default function Page() {
     pollIngestStatus()
     fetchGraph()
     fetchInfraStatus({ silent: true })
-    fetchContext()
+    fetchArmory()
     const t1 = setInterval(pollIngestStatus, 15000)
     const t2 = setInterval(() => checkBackendHealth({ silent: true }), 20000)
     const t3 = setInterval(() => fetchInfraStatus({ silent: true }), 45000)
@@ -193,6 +218,7 @@ export default function Page() {
     }
   }, [
     checkBackendHealth,
+    fetchArmory,
     fetchBrief,
     fetchContext,
     fetchExternal,
@@ -205,19 +231,80 @@ export default function Page() {
     pollIngestStatus,
   ])
 
+  useEffect(() => {
+    const apply = () => {
+      const route = parseHash(window.location.hash)
+      if (!route) return
+      setShellMode(route.shellMode)
+      setLayoutMode(route.layoutMode)
+      setActivePanel(route.activePanel)
+      if (route.kind === 'panel' && route.shellMode === 'dashboard') {
+        useJarvisStore.setState({ stageProject: null, stageHardware: null, mapOpen: false })
+      }
+      if (route.kind === 'map') {
+        applyUiCommand({ type: 'ui_open_map' })
+        return
+      }
+      if (route.kind === 'node') {
+        const slug = route.slug
+        if (slug === 'quad' || slug === 'hex') {
+          applyUiCommand({ type: 'ui_show_hardware', params: { id: slug } })
+          return
+        }
+        if (slug === 'weather' || slug === 'wx-bangalore' || slug === 'weather-blr') {
+          applyUiCommand({ type: 'ui_show_weather' })
+          return
+        }
+        if (slug === 'map' || slug === 'world-map' || slug === 'map-live') {
+          applyUiCommand({ type: 'ui_open_map' })
+          return
+        }
+        if (slug === 'infra' || slug === 'infra-grid') {
+          setShellMode('lab')
+          setLayoutMode('lab')
+          setActivePanel('infra')
+          return
+        }
+        const repo = (useJarvisStore.getState().repos || []).find(
+          (r) => String(r.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-') === slug,
+        )
+        applyUiCommand({ type: 'ui_open_project', params: { name: repo?.name || slug } })
+      }
+    }
+    apply()
+    window.addEventListener('hashchange', apply)
+    return () => window.removeEventListener('hashchange', apply)
+  }, [applyUiCommand, setActivePanel, setLayoutMode, setShellMode])
+
+  useEffect(() => {
+    const next = hashForSnapshot({
+      shellMode,
+      activePanel,
+      selectedNode,
+      stageProject,
+      stageHardware,
+      mapOpen,
+    })
+    if (window.location.hash !== next) {
+      window.history.replaceState(null, '', next)
+    }
+  }, [shellMode, activePanel, selectedNode, stageProject, stageHardware, mapOpen])
+
   const onShellSelect = (id) => {
-    setShellMode(id)
     if (id === 'dashboard') {
-      setLayoutMode('dashboard')
-    } else if (id === 'work') {
+      useJarvisStore.getState().applyUiCommand({ type: 'ui_go_home' })
+      return
+    }
+    setShellMode(id)
+    if (id === 'work') {
       setLayoutMode('work')
       if (!['chat', 'brief', 'vault', 'calendar', 'voice'].includes(activePanel)) {
         setActivePanel('chat')
       }
     } else if (id === 'lab') {
       setLayoutMode('lab')
-      if (!['demos', 'studio', 'ingest', 'graph', 'infra', 'vision', 'wake'].includes(activePanel)) {
-        setActivePanel('demos')
+      if (!['intel', 'demos', 'studio', 'ingest', 'graph', 'infra', 'vision', 'wake'].includes(activePanel)) {
+        setActivePanel('intel')
       }
     }
   }
@@ -252,14 +339,12 @@ export default function Page() {
 
   const renderLabMain = () => {
     switch (activePanel) {
+      case 'intel':
+        return <IntelPanel />
       case 'ingest':
         return <LocalIngestPanel />
       case 'graph':
-        return (
-          <Suspense fallback={<BrainLoading />}>
-            <BrainGraph />
-          </Suspense>
-        )
+        return <BrainGraph />
       case 'infra':
         return (
           <Suspense fallback={<BrainLoading />}>
@@ -307,7 +392,7 @@ export default function Page() {
       {healthState.demo_mode ? (
         <div
           style={{
-            marginTop: 52,
+            marginTop: 64,
             background: 'rgba(255,184,0,0.12)',
             color: 'var(--gold)',
             textAlign: 'center',
@@ -319,7 +404,7 @@ export default function Page() {
           DEMO MODE — sample data may appear
         </div>
       ) : null}
-      {!healthState.ollama && !healthState.groq && !healthState.demo_mode ? (
+      {!llmOnline(healthState) && healthState.healthReady ? (
         <div
           style={{
             background: 'rgba(255,56,96,0.12)',
@@ -328,7 +413,7 @@ export default function Page() {
             fontFamily: 'var(--font-mono)',
             fontSize: '10px',
             padding: '4px',
-            marginTop: healthState.demo_mode ? 0 : 52,
+            marginTop: healthState.demo_mode ? 0 : 64,
           }}
         >
           LLM offline — Groq unreachable or rate-limited; start Ollama as backup
@@ -339,7 +424,7 @@ export default function Page() {
         style={{
           flex: 1,
           display: 'flex',
-          marginTop: healthState.demo_mode || (!healthState.ollama && !healthState.groq) ? 0 : 52,
+          marginTop: 64,
           minHeight: 0,
         }}
       >
@@ -373,13 +458,7 @@ export default function Page() {
               <AppShell
                 sidebar={activePanel === 'chat' ? <ThreadSidebar /> : null}
                 rightPanel={workRightPanel}
-                miniMap={
-                  showMiniMap ? (
-                    <Suspense fallback={<BrainLoading />}>
-                      <BrainGraph />
-                    </Suspense>
-                  ) : null
-                }
+                miniMap={showMiniMap ? <WorldStage /> : null}
               >
                 {renderWorkMain()}
               </AppShell>

@@ -108,9 +108,13 @@ async def research_topic(
         except Exception as exc:
             print(f"[research] compound failed: {exc}")
 
+    try:
+        hits = await web_search.search_web(topic, max_results=8)
+    except Exception:
+        hits = []
+
     # Path B: local search + strong synthesizer
     if not report:
-        hits = await web_search.search_web(topic, max_results=8)
         ctx = web_search.format_hits_for_context(hits)
         synth_prompt = (
             f"Topic: {topic}\n\nWEB RESULTS:\n{ctx}\n\n"

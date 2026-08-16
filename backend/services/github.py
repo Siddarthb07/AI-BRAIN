@@ -17,7 +17,7 @@ def _headers():
     h = {"Accept": "application/vnd.github.v3+json", "User-Agent": "JARVIS-Brain/1.0"}
     token = os.getenv("GITHUB_TOKEN", "").strip()
     if token:
-        h["Authorization"] = f"token {token}"
+        h["Authorization"] = f"Bearer {token}"
     return h
 
 async def fetch_repo(owner: str, repo: str) -> Dict:

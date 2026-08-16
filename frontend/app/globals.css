@@ -8,30 +8,24 @@
   /* ── J.A.R.V.I.S. holographic palette ─────────────────────
      Iron Man HUD: deep blue-black void, holographic cyan,
      arc-reactor white-blue core, sparing gold, alert red. */
-  --bg-void: #020810;
-  --bg-deep: #04101c;
-  --bg-panel: rgba(4, 16, 28, 0.72);
-  --bg-panel-border: rgba(0, 217, 255, 0.28);
+  --bg-void: #010409;
+  --bg-deep: #07040a;
+  --bg-panel: rgba(8, 6, 4, 0.78);
+  --bg-panel-border: rgba(255, 184, 0, 0.28);
 
-  --cyan: #00d9ff;
-  --cyan-bright: #7fdfff;
-  --cyan-dim: rgba(0, 217, 255, 0.45);
-  --cyan-glow: rgba(0, 217, 255, 0.16);
-  --cyan-faint: rgba(0, 217, 255, 0.06);
-
-  --reactor: #c8f4ff;
-  --reactor-dim: rgba(200, 244, 255, 0.5);
-
-  /* Legacy accent hooks — remapped into the holo family so
-     existing inline styles reskin automatically. */
-  --amber: #7fdfff;
-  --amber-dim: rgba(127, 223, 255, 0.4);
-  --magenta: #7aa8ff;
+  --cyan: #5ce1ff;
+  --cyan-bright: #c8f7ff;
+  --cyan-dim: rgba(92, 225, 255, 0.45);
+  --cyan-glow: rgba(92, 225, 255, 0.18);
+  --cyan-faint: rgba(92, 225, 255, 0.07);
+  --reactor: #fff4c8;
+  --reactor-dim: rgba(255, 244, 200, 0.5);
+  --amber: #ffcc33;
+  --amber-dim: rgba(255, 204, 51, 0.4);
+  --magenta: #ff6b8a;
   --teal: #2ee6c8;
-
-  /* Gold — warnings / focus highlights only */
-  --gold: #ffb800;
-  --gold-dim: rgba(255, 184, 0, 0.45);
+  --gold: #ffcc33;
+  --gold-dim: rgba(255, 204, 51, 0.5);
 
   --red: #ff3b30;
   --green: #2ee6c8;
@@ -68,11 +62,11 @@ html, body {
 /* Deep-blue vignette + faint hex-grid texture */
 body {
   background:
-    radial-gradient(ellipse 120% 90% at 50% 40%, rgba(0, 80, 140, 0.14), transparent 65%),
-    repeating-linear-gradient(0deg, rgba(0, 217, 255, 0.022) 0 1px, transparent 1px 34px),
-    repeating-linear-gradient(60deg, rgba(0, 217, 255, 0.016) 0 1px, transparent 1px 34px),
-    repeating-linear-gradient(-60deg, rgba(0, 217, 255, 0.016) 0 1px, transparent 1px 34px),
-    var(--bg-void);
+    radial-gradient(ellipse 80% 70% at 50% 0%, rgba(255, 160, 0, 0.16), transparent 50%),
+    radial-gradient(ellipse 90% 80% at 80% 100%, rgba(0, 90, 180, 0.18), transparent 55%),
+    repeating-linear-gradient(0deg, rgba(255, 200, 60, 0.04) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, rgba(0, 217, 255, 0.03) 0 1px, transparent 1px 28px),
+    #010307;
 }
 
 /* Scanline overlay + slow travelling scan bar */
@@ -492,15 +486,16 @@ body::after {
 
 /* ── Icon rails ──────────────────────────────────────────── */
 .icon-rail {
-  width: 84px;
+  width: 92px;
   flex-shrink: 0;
-  border-right: 1px solid rgba(0, 217, 255, 0.14);
+  border-right: 1px solid rgba(255, 184, 0, 0.28);
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 12px 8px;
-  gap: 8px;
-  background: linear-gradient(180deg, rgba(3, 14, 26, 0.95), rgba(2, 8, 16, 0.92));
+  padding: 16px 8px;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(20, 10, 0, 0.95), rgba(2, 8, 16, 0.96));
+  box-shadow: inset -12px 0 24px rgba(255, 160, 0, 0.08);
 }
 
 .icon-rail-btn {
@@ -526,11 +521,11 @@ body::after {
 }
 
 .icon-rail-btn.is-active {
-  color: var(--cyan);
-  background: rgba(0, 217, 255, 0.1);
-  border-color: rgba(0, 217, 255, 0.4);
-  box-shadow: inset 0 0 14px rgba(0, 217, 255, 0.12), 0 0 8px rgba(0, 217, 255, 0.15);
-  text-shadow: 0 0 8px rgba(0, 217, 255, 0.6);
+  color: var(--gold);
+  border-color: rgba(255, 184, 0, 0.65);
+  background: linear-gradient(180deg, rgba(255, 184, 0, 0.18), rgba(0, 217, 255, 0.08));
+  box-shadow: 0 0 18px rgba(255, 184, 0, 0.35);
+  text-shadow: 0 0 10px rgba(255, 184, 0, 0.7);
 }
 
 /* ── Left panels ─────────────────────────────────────────── */

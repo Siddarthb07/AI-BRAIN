@@ -60,7 +60,6 @@ function TopologyStage({ sites, containers, source }) {
       bodyStyle={{ padding: 0, position: 'relative', overflow: 'hidden' }}
     >
       <div className="infra-topology-grid" aria-hidden />
-      <div className="dash-radar-sweep infra-topology-radar" aria-hidden />
       <svg className="infra-topology-lines" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden>
         {siteDots.map((site, index) => (
           <line key={`s-${site.id}`} x1="500" y1="150" x2={95 + index * 105} y2="55" />

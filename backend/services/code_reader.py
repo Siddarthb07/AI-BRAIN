@@ -1,9 +1,7 @@
 import os
-import base64
+import asyncio
 import httpx
 from typing import List, Dict, Tuple
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 # Files worth reading for code intelligence
 CODE_EXTENSIONS = {
@@ -11,6 +9,13 @@ CODE_EXTENSIONS = {
     '.c', '.cpp', '.h', '.cs', '.rb', '.php', '.swift', '.kt',
     '.md', '.txt', '.yaml', '.yml', '.toml', '.json', '.env.example',
     '.sql', '.sh', '.dockerfile', 'dockerfile',
+}
+
+DOTFILE_ALLOW = {'.env.example'}
+CREDENTIAL_DENY = {
+    '.npmrc', '.netrc', '.pypirc', '.git-credentials', '.dockercfg',
+    '.env', '.env.local', '.env.production', '.env.development',
+    '.aws', 'credentials', 'id_rsa', 'id_ed25519',
 }
 
 # Files/dirs to always skip
@@ -35,19 +40,22 @@ SKIP_DOC_NAMES = {
 
 def _headers():
     h = {"Accept": "application/vnd.github.v3+json", "User-Agent": "JARVIS-Brain/1.0"}
-    if GITHUB_TOKEN:
-        h["Authorization"] = f"token {GITHUB_TOKEN}"
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if token:
+        h["Authorization"] = f"Bearer {token}"
     return h
 
 def _should_read(path: str) -> bool:
     parts = path.lower().split('/')
-    if any(p in SKIP_PATHS for p in parts):
+    if any(p in SKIP_PATHS or p in CREDENTIAL_DENY for p in parts):
         return False
     name = parts[-1]
-    if name in SKIP_DOC_NAMES or name.startswith('.'):
+    if name in CREDENTIAL_DENY or name in SKIP_DOC_NAMES:
+        return False
+    if name.startswith('.') and name not in DOTFILE_ALLOW:
         return False
     ext = '.' + name.rsplit('.', 1)[-1] if '.' in name else name
-    return ext in CODE_EXTENSIONS or name in CODE_EXTENSIONS
+    return ext in CODE_EXTENSIONS or name in CODE_EXTENSIONS or name in DOTFILE_ALLOW
 
 async def fetch_file_tree(owner: str, repo: str) -> List[Dict]:
     """Get full recursive file tree via Git Trees API."""
@@ -132,14 +140,29 @@ async def deep_ingest_repo(owner: str, repo: str) -> List[Dict]:
 
     chunks = []
     total_chars = 0
+    sem = asyncio.Semaphore(8)
 
-    for item in selected:
-        if total_chars >= MAX_TOTAL_CHARS:
-            break
-        path = item["path"]
-        content = await fetch_file_content(owner, repo, path)
-        if not content.strip():
+    async def _one(item: Dict):
+        async with sem:
+            path = item["path"]
+            content = await fetch_file_content(owner, repo, path)
+            if not content.strip():
+                return None
+            from services import event_bus
+
+            await event_bus.publish(
+                "ingest.file",
+                {"owner": owner, "repo": repo, "path": path, "chars": len(content)},
+            )
+            return {**item, "content": content}
+
+    fetched = await asyncio.gather(*(_one(item) for item in selected))
+
+    for item in fetched:
+        if not item or total_chars >= MAX_TOTAL_CHARS:
             continue
+        path = item["path"]
+        content = item["content"]
 
         # Determine language from extension
         ext = path.rsplit('.', 1)[-1] if '.' in path else 'text'

@@ -111,7 +111,7 @@ function beginPlaybackSession() {
   return speechToken
 }
 
-async function waitForVoices(timeoutMs = 400) {
+async function waitForVoices(timeoutMs = 120) {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return []
 
   const existing = window.speechSynthesis.getVoices()
@@ -148,8 +148,8 @@ function pickVoiceCached(voices = [], voiceMatchers = []) {
 }
 
 /** Speakable clip — keeps more of the reply; trims ACTIONS JSON + markdown noise. */
-export const DEFAULT_SPEECH_MAX_CHARS = 4500
-export const DEFAULT_SPEECH_CHUNK_CHARS = 620
+export const DEFAULT_SPEECH_MAX_CHARS = 1600
+export const DEFAULT_SPEECH_CHUNK_CHARS = 280
 
 export function clipForSpeech(text = '', maxChars = DEFAULT_SPEECH_MAX_CHARS) {
   let cleaned = String(text)
@@ -295,7 +295,7 @@ async function speakInBrowser(text, options = {}, token = speechToken) {
       }
       const utterance = new SpeechSynthesisUtterance(chunk)
       utterance.lang = options.lang ?? preferred?.lang ?? 'en-US'
-      utterance.rate = options.rate ?? 1.05
+      utterance.rate = options.rate ?? 1.32
       utterance.pitch = options.pitch ?? 1
       utterance.volume = options.volume ?? 1
       if (preferred) utterance.voice = preferred
@@ -381,7 +381,7 @@ export function createStreamingSpeaker(options = {}) {
   const token = beginPlaybackSession()
   let preferred = null
   let rawBuf = ''
-  let spokenWordCount = 0
+  let spokenLen = 0
   let ended = false
   let started = false
   let pending = 0
@@ -408,7 +408,7 @@ export function createStreamingSpeaker(options = {}) {
 
   const ensureVoice = async () => {
     if (preferred || token !== speechToken) return preferred
-    const voices = await waitForVoices(180)
+    const voices = await waitForVoices(80)
     if (token !== speechToken) return null
     preferred = pickVoiceCached(voices, options.voiceMatchers || AMERICAN_VOICE_MATCHERS)
     return preferred
@@ -434,7 +434,7 @@ export function createStreamingSpeaker(options = {}) {
 
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = options.lang ?? preferred?.lang ?? 'en-US'
-    utterance.rate = options.rate ?? 1.08
+    utterance.rate = options.rate ?? 1.32
     utterance.pitch = options.pitch ?? 1
     utterance.volume = options.volume ?? 1
     if (preferred) utterance.voice = preferred
@@ -476,16 +476,34 @@ export function createStreamingSpeaker(options = {}) {
     const cleaned = cleanedSpeechText()
     if (!cleaned.trim()) return
 
-    const words = cleaned.trim().split(/\s+/).filter(Boolean)
-    const beforeActions = rawBuf.split(/\n?ACTIONS:\s*/i)[0] || ''
-    const sourceEndsWithSpace = /\s$/.test(beforeActions)
-    const completeCount =
-      force || actionsHit || sourceEndsWithSpace ? words.length : Math.max(0, words.length - 1)
+    const rest = cleaned.slice(spokenLen).trimStart()
+    if (!rest) return
 
-    const cap = options.maxWords ?? 900
-    while (spokenWordCount < completeCount && spokenWordCount < cap) {
-      enqueueUtterance(words[spokenWordCount])
-      spokenWordCount += 1
+    const takePhrase = () => {
+      if (force) return rest
+      const punct = rest.match(/^([\s\S]{8,160}?[\.!\?;:])(?:\s|$)/)
+      if (punct) return punct[1]
+      const words = rest.split(/\s+/).filter(Boolean)
+      if (words.length >= 8) return words.slice(0, 10).join(' ')
+      return ''
+    }
+
+    let phrase = takePhrase()
+    while (phrase) {
+      enqueueUtterance(phrase)
+      spokenLen = cleaned.indexOf(phrase, spokenLen)
+      if (spokenLen < 0) spokenLen = cleaned.length
+      else spokenLen += phrase.length
+      const next = cleaned.slice(spokenLen).trimStart()
+      if (!force && next.split(/\s+/).filter(Boolean).length < 8 && !/[.!\?;:]/.test(next)) break
+      const punct = next.match(/^([\s\S]{8,160}?[\.!\?;:])(?:\s|$)/)
+      phrase = force
+        ? next
+        : punct
+          ? punct[1]
+          : next.split(/\s+/).filter(Boolean).length >= 8
+            ? next.split(/\s+/).slice(0, 10).join(' ')
+            : ''
     }
   }
 

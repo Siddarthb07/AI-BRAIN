@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -9,20 +11,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import brief, calendar, chat, context, demos, graph, gestures, house, infra, ingest, media, research, vault, vision, voice
+from routers import brief, calendar, chat, context, demos, graph, gestures, house, infra, ingest, intel, media, research, vault, vision, voice
 from services import config
 from services.auth import JarvisAuthMiddleware
 from services import demo_builder as demo_builder_svc
 
 app = FastAPI(title="JARVIS AI Brain", version="2.0.0")
 
+_health_cache: dict | None = None
+_health_cache_at: float = 0.0
+
 _cors = config.cors_origins()
 if _cors == ["*"]:
-    # PUBLIC_MODE / tunnel / LAN — cannot combine allow_origins=["*"] with credentials
+    # Wildcard origins cannot be paired with credentialed CORS.
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r".*",
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -50,6 +55,7 @@ app.include_router(house.router, prefix="/house", tags=["house"])
 app.include_router(vision.router, prefix="/vision", tags=["vision"])
 app.include_router(demos.router, prefix="/demos", tags=["demos"])
 app.include_router(research.router, prefix="/research", tags=["research"])
+app.include_router(intel.router, prefix="/intel", tags=["intel"])
 app.include_router(infra.router, prefix="/infra", tags=["infra"])
 
 generated_root = Path(__file__).parent / "data" / "generated"
@@ -109,6 +115,7 @@ def root():
             "/vision",
             "/demos",
             "/research",
+            "/intel",
             "/infra",
             "/demos-static",
             "/generated",
@@ -118,32 +125,59 @@ def root():
 
 @app.get("/health")
 async def health():
+    import asyncio
+    import time
+
     import httpx
 
     from services import llm, vault as vault_svc
     from services.house import get_adapter, ha_configured, writes_enabled
 
-    ollama_ok = await llm.is_ollama_available()
-    groq_ok = await llm.is_groq_available()
-    vault_st = vault_svc.vault_status()
+    global _health_cache, _health_cache_at
+    now = time.monotonic()
+    if _health_cache is not None and now - _health_cache_at < 3.0:
+        return _health_cache
 
-    qdrant_ok = False
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{qdrant_url}/collections")
-            qdrant_ok = resp.status_code == 200
-    except Exception:
-        qdrant_ok = False
 
+    async def _qdrant() -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                resp = await client.get(f"{qdrant_url}/collections")
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def _ollama() -> bool:
+        # Ollama is often offline on this host — keep the probe short so UI health stays snappy.
+        try:
+            async with httpx.AsyncClient(timeout=0.8) as client:
+                resp = await client.get(f"{os.getenv('OLLAMA_URL', 'http://host.docker.internal:11434')}/api/tags")
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def _groq() -> bool:
+        # Soft-available when key is configured — probe flaps should not blank the UI / graph.
+        configured = bool(getattr(llm, "GROQ_API_KEY", None) or os.getenv("GROQ_API_KEY"))
+        try:
+            probed = await asyncio.wait_for(llm.is_groq_available(), timeout=2.0)
+            return bool(probed)
+        except Exception:
+            return configured
+
+    ollama_ok, groq_ok, qdrant_ok = await asyncio.gather(_ollama(), _groq(), _qdrant())
+    vault_st = vault_svc.vault_status()
     house_backend = get_adapter().name
     llm_status = llm.provider_status()
-    all_ok = (ollama_ok or groq_ok) and vault_st.get("note_count", 0) >= 0
-    return {
+    # Configured LLM counts as healthy even if the probe timed out.
+    llm_ready = ollama_ok or groq_ok or bool(llm_status.get("groq_configured"))
+    all_ok = llm_ready and vault_st.get("note_count", 0) >= 0
+    payload = {
         "status": "ok" if all_ok else "degraded",
         "message": "All systems nominal." if all_ok else "Some services unavailable.",
         "ollama": ollama_ok,
-        "groq": groq_ok,
+        "groq": groq_ok or bool(llm_status.get("groq_configured")),
         "llm": llm_status,
         "qdrant": qdrant_ok,
         "vault_configured": vault_st.get("configured", False),
@@ -154,3 +188,6 @@ async def health():
         "house_writes_enabled": writes_enabled(),
         "version": "2.0.0",
     }
+    _health_cache = payload
+    _health_cache_at = now
+    return payload

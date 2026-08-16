@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useJarvisStore } from '../../app/store'
+import { llmOnline } from '../../lib/health'
 
 function useClock() {
   // Starts null so SSR and first client render match; ticks after mount.
@@ -27,7 +28,7 @@ export default function HudOverlay() {
   const hh = now ? String(now.getHours()).padStart(2, '0') : '--'
   const mm = now ? String(now.getMinutes()).padStart(2, '0') : '--'
   const ss = now ? String(now.getSeconds()).padStart(2, '0') : '--'
-  const online = healthState?.ollama || healthState?.groq
+  const online = llmOnline(healthState)
 
   return (
     <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9000 }}>

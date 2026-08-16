@@ -379,7 +379,7 @@ async def chat_completion_stream(
 
 async def is_ollama_available() -> bool:
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=0.8) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
             return resp.status_code == 200
     except Exception:
@@ -390,7 +390,7 @@ async def is_groq_available() -> bool:
     if not GROQ_API_KEY:
         return False
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=2.5) as client:
             resp = await client.get(
                 "https://api.groq.com/openai/v1/models",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},

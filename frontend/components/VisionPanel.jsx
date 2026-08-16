@@ -425,7 +425,7 @@ export default function VisionPanel() {
             {meta?.provider ? (
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-dim)' }}>
                 {String(meta.provider).toUpperCase()}
-                {meta.model ? ` · ${meta.model}` : ''} · API {API_BASE}
+                {meta.model ? ` · ${meta.model}` : ''} · API {resolveApiBase()}
               </div>
             ) : null}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

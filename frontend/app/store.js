@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { formatIstBriefLabel } from '../lib/time'
 
 import { resolveApiBase, withAuth } from '../lib/api'
+import { llmOnline } from '../lib/health'
 import { requestGestureCamera } from '../lib/gestures'
 
 /** Always resolve at call time so Docker (localhost:8001) vs tunnel (/backend) both work. */
@@ -21,6 +22,41 @@ const DEFAULT_GOOGLE_CALENDAR = {
   last_error: null,
   upcoming_count: 0,
   events: [],
+}
+
+function localLibraryHits(repos, query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return []
+  return (repos || []).flatMap((r) => {
+    const deps = r.key_deps || {}
+    const blob = [
+      r.name,
+      r.description,
+      r.language,
+      ...(r.topics || []),
+      ...(r.imports || []),
+      ...Object.keys(deps),
+    ]
+      .join(' ')
+      .toLowerCase()
+    if (!blob.includes(q)) return []
+    const kind = Object.keys(deps).some((k) => k.toLowerCase().includes(q))
+      ? 'DECLARED'
+      : (r.imports || []).some((i) => String(i).toLowerCase().includes(q))
+        ? 'IMPORT'
+        : 'META'
+    return [{ repo: r.name, kind, version: '', language: r.language }]
+  })
+}
+
+function mergeScanHits(localHits, remoteHits) {
+  const map = new Map()
+  for (const h of [...(localHits || []), ...(remoteHits || [])]) {
+    if (!h?.repo) continue
+    const key = `${h.repo}::${h.kind || 'META'}::${h.path || ''}`
+    if (!map.has(key)) map.set(key, h)
+  }
+  return [...map.values()]
 }
 
 const EMPTY_BRIEF = {
@@ -65,9 +101,9 @@ export const useJarvisStore = create((set, get) => ({
   visionLastCapture: null,
   graphSpinEnabled: true,
   statusMsg: 'JARVIS ONLINE',
-  activePanel: 'chat',
+  activePanel: 'dashboard',
   activeDemoId: null,
-  layoutMode: 'work',
+  layoutMode: 'dashboard',
   shellMode: 'dashboard',
   graphData: null,
   graphProjection: null,
@@ -94,9 +130,30 @@ export const useJarvisStore = create((set, get) => ({
     vault_configured: false,
     demo_mode: false,
     llm: null,
+    healthReady: false,
   },
   googleCalendar: DEFAULT_GOOGLE_CALENDAR,
   lastSaveToast: null,
+  intelArmory: { keys: [], recap: null },
+  scanSweep: { query: '', hits: [], t0: 0, github_error: null },
+  radarHits: [],
+  dossier: null,
+  ingestCinema: { active: false, files: [], repo: '' },
+  bootRecap: null,
+  ephemeralPins: [],
+  webSummary: null,
+  xrayView: null,
+  repoLlmConsent: false,
+  graphAskReply: '',
+  pendingRepoAsk: false,
+  worldEvents: { hotspots: [], news: [], hn: [] },
+  mapFocus: { region: 'world', lat: 20, lon: 20, distance: 14, label: 'WORLD' },
+  stageProject: null,
+  stageHardware: null,
+  craftCommand: null,
+  stageMedia: null,
+  mapOpen: false,
+  weather: null,
 
   setRepos: (repos) => set({ repos }),
   setBrief: (brief) => set({ brief }),
@@ -253,16 +310,17 @@ export const useJarvisStore = create((set, get) => ({
         return {
           healthState: {
             ollama: Boolean(data.ollama),
-            groq: Boolean(data.groq),
+            groq: Boolean(data.groq || data.llm?.groq_configured),
             qdrant: Boolean(data.qdrant),
             vault_configured: Boolean(data.vault_configured),
             demo_mode: Boolean(data.demo_mode),
             vault_path: data.vault_path,
             llm: data.llm || null,
+            healthReady: true,
           },
           statusMsg:
             repairStatus && offlineLike.has(state.statusMsg)
-              ? data.ollama || data.groq
+              ? llmOnline({ ...data, groq: data.groq || data.llm?.groq_configured })
                 ? 'JARVIS ONLINE'
                 : 'LLM OFFLINE — START OLLAMA OR GROQ'
               : state.statusMsg,
@@ -271,6 +329,7 @@ export const useJarvisStore = create((set, get) => ({
       return data
     } catch {
       if (!silent) set({ statusMsg: 'BACKEND OFFLINE' })
+      set((s) => ({ healthState: { ...s.healthState, healthReady: true } }))
       return null
     }
   },
@@ -505,13 +564,22 @@ export const useJarvisStore = create((set, get) => ({
       if (layers) params.set('layers', Array.isArray(layers) ? layers.join(',') : layers)
       if (limit) params.set('limit', String(limit))
       const qs = params.toString()
-      const res = await jfetch(`${api()}/graph${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+      const timer = controller ? setTimeout(() => controller.abort(), 25000) : null
+      const res = await jfetch(`${api()}/graph${qs ? `?${qs}` : ''}`, {
+        cache: 'no-store',
+        signal: controller?.signal,
+      })
+      if (timer) clearTimeout(timer)
       if (!res.ok) throw new Error('graph failed')
       const data = await res.json()
-      set({ graphData: data, graphProjection: data })
+      set({ graphData: data, graphProjection: data, statusMsg: get().statusMsg === 'GRAPH OFFLINE' ? 'JARVIS ONLINE' : get().statusMsg })
       return data
     } catch {
-      set({ statusMsg: 'GRAPH OFFLINE' })
+      // Keep last good projection so BrainGraph does not blank out on a slow poll.
+      set((state) => ({
+        statusMsg: state.graphProjection?.nodes?.length ? state.statusMsg : 'GRAPH OFFLINE',
+      }))
       return null
     }
   },
@@ -735,7 +803,10 @@ export const useJarvisStore = create((set, get) => ({
   },
 
   ingestGitHub: async (username) => {
-    set({ statusMsg: `DEEP-READING ${username.toUpperCase()}...` })
+    set({
+      statusMsg: `DEEP-READING ${username.toUpperCase()}...`,
+      ingestCinema: { active: true, files: [], repo: username },
+    })
     try {
       const res = await jfetch(`${api()}/ingest/github/user/${username}?deep=true`)
       const data = await res.json()
@@ -746,15 +817,19 @@ export const useJarvisStore = create((set, get) => ({
           statusMsg: `INDEXED ${data.repo_count || nextRepos.length} REPOS`,
         })
       } else {
-        // Keep existing repos — empty response is usually rate-limit / auth, not "no repos"
         set({
           statusMsg: data.error || 'GITHUB INGEST EMPTY — CHECK TOKEN / RATE LIMIT',
         })
       }
-      setTimeout(() => get().pollIngestStatus(), 3000)
+      const cinema = setInterval(() => get().pollIntelEvents(), 800)
+      setTimeout(() => {
+        clearInterval(cinema)
+        get().pollIngestStatus()
+        set({ ingestCinema: { active: false, files: get().ingestCinema.files, repo: username } })
+      }, 18000)
       return data
     } catch {
-      set({ statusMsg: 'GITHUB INGEST FAILED' })
+      set({ statusMsg: 'GITHUB INGEST FAILED', ingestCinema: { active: false, files: [], repo: '' } })
     }
   },
 
@@ -770,6 +845,339 @@ export const useJarvisStore = create((set, get) => ({
     } catch {}
   },
 
+  fetchArmory: async () => {
+    try {
+      const res = await jfetch(`${api()}/intel/armory`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      set({ intelArmory: data, bootRecap: data.recap || null })
+    } catch {}
+  },
+
+  setDossier: (dossier) => set({ dossier }),
+
+  runLibraryScan: async (query) => {
+    const q = String(query || '').trim()
+    if (!q) return
+    const localHits = localLibraryHits(get().repos, q)
+    set({
+      statusMsg: `SCAN · ${q.toUpperCase()}`,
+      scanSweep: { query: q, hits: localHits, t0: Date.now(), github_error: null },
+      shellMode: 'lab',
+      layoutMode: 'graph',
+      activePanel: 'graph',
+    })
+    try {
+      const res = await jfetch(`${api()}/intel/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      })
+      const data = await res.json()
+      const remote = data.hits || []
+      const merged = mergeScanHits(localHits, remote)
+      const err = data.github_error || null
+      set({
+        scanSweep: { query: q, hits: merged, t0: Date.now(), github_error: err },
+        statusMsg: err
+          ? `SEARCH UNAVAILABLE · ${err} · ${merged.length} LOCAL`
+          : `LOCKS · ${merged.length} · ${q.toUpperCase()}`,
+      })
+      return { ...data, hits: merged, count: merged.length }
+    } catch {
+      set({
+        statusMsg: localHits.length ? `LOCKS · ${localHits.length} · LOCAL` : 'SCAN FAILED',
+      })
+    }
+  },
+
+  runRadarSearch: async (query, opts = {}) => {
+    const q = String(query || '').trim()
+    if (!q) return
+    set({
+      statusMsg: `WEB · ${q.toUpperCase()}`,
+      ephemeralPins: [],
+      webSummary: null,
+      ...(opts.stay
+        ? {}
+        : { shellMode: 'lab', layoutMode: 'graph', activePanel: 'graph' }),
+    })
+    try {
+      const res = await jfetch(`${api()}/intel/radar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      })
+      const data = await res.json()
+      set({ radarHits: data.hits || [], statusMsg: `WEB HITS · ${(data.hits || []).length}` })
+      return data
+    } catch {
+      set({ statusMsg: 'WEB SEARCH FAILED' })
+      return { hits: [] }
+    }
+  },
+
+  summarizeWebHit: async (hit) => {
+    if (!hit) return
+    set({ statusMsg: 'SUMMARIZING…', webSummary: { title: hit.title, url: hit.url, summary: '…' } })
+    try {
+      const res = await jfetch(`${api()}/intel/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: hit.title || '',
+          snippet: hit.snippet || hit.content || '',
+          url: hit.url || '',
+        }),
+      })
+      const data = await res.json()
+      set({ webSummary: data, statusMsg: 'SUMMARY READY' })
+      return data
+    } catch {
+      set({ statusMsg: 'SUMMARY FAILED', webSummary: { ...hit, summary: '', error: 'failed' } })
+    }
+  },
+
+  pinWebHit: (hit) => {
+    if (!hit?.url && !hit?.title) return
+    const pin = {
+      id: `pin:${hit.url || hit.title}`,
+      title: hit.title || hit.url,
+      url: hit.url || '',
+      snippet: hit.snippet || '',
+    }
+    set((s) => {
+      const rest = (s.ephemeralPins || []).filter((p) => p.id !== pin.id)
+      const next = [...rest, pin].slice(-3)
+      return { ephemeralPins: next, statusMsg: `PINNED · ${next.length}/3` }
+    })
+  },
+
+  askAboutUrl: async (hit) => {
+    const url = hit?.url || ''
+    const title = hit?.title || url
+    await get().sendChat(`Summarize and tell me why this matters: ${title}\n${url}`, { skipFocus: true })
+  },
+
+  fetchXray: async (repo) => {
+    const name = String(repo || '').trim()
+    if (!name) return
+    try {
+      const res = await jfetch(`${api()}/intel/xray/${encodeURIComponent(name)}`, { cache: 'no-store' })
+      const data = await res.json()
+      set({ xrayView: data, statusMsg: `X-RAY · ${name}` })
+      return data
+    } catch {
+      set({ statusMsg: 'X-RAY FAILED' })
+    }
+  },
+
+  grantRepoLlmConsent: () => {
+    const name = get().focusRepo
+    set({ repoLlmConsent: true, pendingRepoAsk: false })
+    if (name) void get().askFocusedRepo(name)
+  },
+
+  askFocusedRepo: async (repo) => {
+    const name = String(repo || get().focusRepo || '').trim()
+    if (!name) return
+    if (!get().repoLlmConsent) {
+      set({ pendingRepoAsk: true, focusRepo: name, statusMsg: `CONSENT · ${name}` })
+      return
+    }
+    await get().sendChat(`Brief me on ${name}: what it is, stack, and current risks.`, {
+      forceFocus: true,
+    })
+  },
+
+  clearHud: () =>
+    set({
+      selectedNode: null,
+      scanSweep: { query: '', hits: [], t0: 0, github_error: null },
+      radarHits: [],
+      ephemeralPins: [],
+      webSummary: null,
+      xrayView: null,
+      graphAskReply: '',
+      pendingRepoAsk: false,
+      stageProject: null,
+      stageHardware: null,
+      stageMedia: null,
+      mapOpen: false,
+      statusMsg: 'HUD CLEAR',
+    }),
+
+  fetchWorldEvents: async () => {
+    try {
+      const res = await jfetch(`${api()}/intel/world`, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      set({ worldEvents: data })
+    } catch {}
+  },
+
+  fetchHotspotBrief: async (title, region) => {
+    const params = new URLSearchParams()
+    if (title) params.set('title', title)
+    if (region) params.set('region', region)
+    try {
+      const res = await jfetch(`${api()}/intel/hotspot?${params.toString()}`, { cache: 'no-store' })
+      if (!res.ok) return { hits: [], error: `HTTP ${res.status}` }
+      return await res.json()
+    } catch {
+      return { hits: [], error: 'hotspot fetch failed' }
+    }
+  },
+
+  fetchWeather: async () => {
+    try {
+      const res = await fetch(
+        'https://api.open-meteo.com/v1/forecast?latitude=12.97&longitude=77.59&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m',
+        { cache: 'no-store' },
+      )
+      if (!res.ok) return
+      const data = await res.json()
+      const c = data.current || {}
+      set({
+        weather: {
+          city: 'Bangalore',
+          lat: 12.97,
+          lon: 77.59,
+          temp: c.temperature_2m,
+          humidity: c.relative_humidity_2m,
+          wind: c.wind_speed_10m,
+          code: c.weather_code,
+          unit: data.current_units?.temperature_2m || '°C',
+        },
+      })
+    } catch {}
+  },
+
+  applyUiCommands: (cmds) => {
+    const list = Array.isArray(cmds) ? cmds : []
+    for (const cmd of list) get().applyUiCommand(cmd)
+  },
+
+  applyUiCommand: (cmd) => {
+    if (!cmd?.type) return
+    const params = cmd.params || {}
+    set({ shellMode: 'dashboard', layoutMode: 'dashboard', activePanel: 'dashboard' })
+    if (cmd.type === 'ui_zoom_map') {
+      const region = String(params.region || 'world').toLowerCase()
+      const table = {
+        world: { region: 'world', lat: 20, lon: 20, distance: 14, label: 'WORLD' },
+        india: { region: 'india', lat: 22, lon: 79, distance: 6.2, label: 'INDIA' },
+        indian: { region: 'india', lat: 22, lon: 79, distance: 6.2, label: 'INDIA' },
+        ukraine: { region: 'ukraine', lat: 48.4, lon: 31.2, distance: 5.8, label: 'UKRAINE' },
+        gaza: { region: 'gaza', lat: 31.5, lon: 34.45, distance: 5.2, label: 'LEVANT' },
+        sudan: { region: 'sudan', lat: 15.5, lon: 32.5, distance: 6, label: 'SUDAN' },
+        taiwan: { region: 'taiwan', lat: 23.7, lon: 121, distance: 5.8, label: 'TAIWAN' },
+        usa: { region: 'usa', lat: 39, lon: -98, distance: 7.5, label: 'USA' },
+        europe: { region: 'europe', lat: 50, lon: 10, distance: 7.2, label: 'EUROPE' },
+        china: { region: 'china', lat: 35, lon: 105, distance: 7, label: 'CHINA' },
+      }
+      set({ mapFocus: table[region] || table.world, mapOpen: true, statusMsg: `MAP · ${(table[region] || table.world).label}` })
+    }
+    if (cmd.type === 'ui_map_scale') {
+      const cur = get().mapFocus || { region: 'world', lat: 20, lon: 20, distance: 14, label: 'WORLD' }
+      const dir = Number(params.dir || 0)
+      const raw = (cur.distance || 14) * (dir < 0 ? 1.18 : 0.84)
+      const next = Math.max(3.5, Math.min(16, raw))
+      set({
+        mapOpen: true,
+        mapFocus: { ...cur, distance: next },
+        statusMsg: `MAP · ${dir > 0 ? 'ZOOM IN' : 'ZOOM OUT'}`,
+      })
+    }
+    if (cmd.type === 'ui_open_map') {
+      set({
+        mapOpen: true,
+        stageHardware: null,
+        stageProject: null,
+        selectedNode: { id: 'sys:map', label: 'WORLD MAP', type: 'map', data: {} },
+        statusMsg: 'MAP · WORLD',
+      })
+    }
+    if (cmd.type === 'ui_show_weather') {
+      void get().fetchWeather()
+      set({
+        mapOpen: false,
+        stageHardware: null,
+        stageProject: null,
+        selectedNode: { id: 'sys:weather', label: 'WX · BANGALORE', type: 'weather', data: get().weather || {} },
+        statusMsg: 'WX · BANGALORE',
+      })
+    }
+    if (cmd.type === 'ui_open_project') {
+      const name = String(params.name || '').trim()
+      const repo = (get().repos || []).find((r) => String(r.name || '').toLowerCase() === name.toLowerCase())
+      set({
+        stageProject: repo || { name },
+        focusRepo: name,
+        selectedNode: {
+          id: `repo:${name}`,
+          label: name,
+          type: 'repo',
+          data: repo || { name },
+        },
+        stageHardware: null,
+        mapOpen: false,
+        statusMsg: `PROJECT · ${name.toUpperCase()}`,
+      })
+      void get().fetchXray(name)
+    }
+    if (cmd.type === 'ui_show_hardware') {
+      const id = String(params.id || '').toLowerCase().includes('hex') ? 'hex' : 'quad'
+      const label = id === 'hex' ? 'HEX · F550 NAZA' : 'QUAD · KK2.1.5'
+      set({
+        stageHardware: id,
+        stageProject: null,
+        mapOpen: false,
+        selectedNode: { id: `hw:${id}`, label, type: 'hardware', data: { id } },
+        statusMsg: `HOLO · ${id.toUpperCase()}`,
+      })
+    }
+    if (cmd.type === 'ui_craft') {
+      const action = String(params.action || 'explode')
+      set({
+        craftCommand: { type: action, id: params.id || '' },
+        statusMsg: `CRAFT · ${action.toUpperCase()}`,
+      })
+    }
+    if (cmd.type === 'ui_go_home') {
+      get().clearHud()
+      set({
+        shellMode: 'dashboard',
+        layoutMode: 'dashboard',
+        activePanel: 'dashboard',
+        statusMsg: 'HOME',
+      })
+      if (typeof window !== 'undefined' && window.location.hash !== '#home') {
+        window.location.hash = '#home'
+      }
+    }
+    if (cmd.type === 'ui_clear_stage') {
+      get().clearHud()
+    }
+  },
+
+  pollIntelEvents: async () => {
+    try {
+      const res = await jfetch(`${api()}/intel/events?limit=30`, { cache: 'no-store' })
+      const data = await res.json()
+      const files = (data.events || [])
+        .filter((e) => e.type === 'ingest.file')
+        .map((e) => e.payload?.path)
+        .filter(Boolean)
+        .slice(-18)
+      if (files.length) {
+        set((s) => ({
+          ingestCinema: { ...s.ingestCinema, files, active: s.ingestCinema.active || files.length > 0 },
+        }))
+      }
+    } catch {}
+  },
+
   sendChat: async (message, opts = {}) => {
     const { chatHistory, sessionId, focusRepo, selectedNode, contextState } = get()
     const selectedName =
@@ -777,11 +1185,14 @@ export const useJarvisStore = create((set, get) => ({
         ? String(selectedNode.label || selectedNode.data?.name || '').trim()
         : ''
     const focus =
-      selectedName ||
-      focusRepo ||
-      (contextState?.active_project && contextState.active_project !== 'unset'
-        ? contextState.active_project
-        : null)
+      opts.skipFocus
+        ? null
+        : selectedName ||
+          focusRepo ||
+          (contextState?.active_project && contextState.active_project !== 'unset'
+            ? contextState.active_project
+            : null)
+    const allowFocus = Boolean(focus) && (opts.forceFocus || get().repoLlmConsent)
 
     const onToken = typeof opts.onToken === 'function' ? opts.onToken : null
 
@@ -797,7 +1208,7 @@ export const useJarvisStore = create((set, get) => ({
           message,
           include_context: true,
           session_id: sessionId,
-          focus_repo: focus || undefined,
+          focus_repo: allowFocus ? focus || undefined : undefined,
         }),
       })
       if (!res.ok || !res.body) {
@@ -808,7 +1219,7 @@ export const useJarvisStore = create((set, get) => ({
       const decoder = new TextDecoder()
       let buffer = ''
       let assistant = ''
-      let meta = { citations: [], actions: [], llm_offline: false }
+      let meta = { citations: [], actions: [], ui: [], llm_offline: false }
       let gotSession = sessionId
 
       // Placeholder assistant bubble that streams in place
@@ -854,6 +1265,7 @@ export const useJarvisStore = create((set, get) => ({
             meta = {
               citations: event.citations || [],
               actions: event.actions || [],
+              ui: event.ui || [],
               llm_offline: Boolean(event.llm_offline),
               demo: event.demo || null,
               research: event.research || null,
@@ -883,6 +1295,7 @@ export const useJarvisStore = create((set, get) => ({
         const next = {
           sessionId: gotSession || state.sessionId,
           chatHistory: hist,
+          graphAskReply: assistant || '',
           statusMsg: meta.llm_offline
             ? 'LLM OFFLINE'
             : meta.demo
@@ -894,8 +1307,20 @@ export const useJarvisStore = create((set, get) => ({
         if (meta.demo?.id) {
           next.activeDemoId = meta.demo.id
         }
+        if (meta.research) {
+          next.dossier = {
+            topic: meta.research.topic,
+            report: meta.research.report || assistant,
+            hits: meta.research.hits || meta.citations || [],
+            provider: meta.research.provider,
+          }
+          next.shellMode = 'lab'
+          next.activePanel = 'intel'
+          next.layoutMode = 'lab'
+        }
         return next
       })
+      get().applyUiCommands(meta.ui)
       // Keep thread list in sync with latest session titles / order
       void get().refreshChatSessions()
       return assistant

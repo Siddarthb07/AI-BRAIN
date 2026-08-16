@@ -6,7 +6,11 @@ import { formatIstEventWhen, formatIstEventDateTime } from '../lib/time'
 import { resolveApiBase } from '../lib/api'
 import { AMERICAN_VOICE_MATCHERS, clipForSpeech, createStreamingSpeaker, speakText } from '../lib/speech'
 import { routeVoiceCommand } from '../lib/voiceCommands'
+import { llmOnline } from '../lib/health'
 import ArcReactor from './jarvis/ArcReactor'
+import WorldMap2D from './WorldMap2D'
+import PlexusCraft from './PlexusCraft'
+import ProjectDossier from './ProjectDossier'
 
 const BrainGraph = lazy(() => import('./BrainGraph'))
 
@@ -104,6 +108,8 @@ export default function DashboardPanel() {
   const saveToVault = useJarvisStore((s) => s.saveToVault)
   const sendChat = useJarvisStore((s) => s.sendChat)
   const healthState = useJarvisStore((s) => s.healthState)
+  const stageHardware = useJarvisStore((s) => s.stageHardware)
+  const stageProject = useJarvisStore((s) => s.stageProject)
   const checkBackendHealth = useJarvisStore((s) => s.checkBackendHealth)
   const fetchGraph = useJarvisStore((s) => s.fetchGraph)
   const graphProjection = useJarvisStore((s) => s.graphProjection)
@@ -128,6 +134,15 @@ export default function DashboardPanel() {
   const openDemo = useJarvisStore((s) => s.openDemo)
   const setSelectedInfraId = useJarvisStore((s) => s.setSelectedInfraId)
   const infraStatus = useJarvisStore((s) => s.infraStatus)
+  const intelArmory = useJarvisStore((s) => s.intelArmory)
+  const worldEvents = useJarvisStore((s) => s.worldEvents)
+  const hnStories = useJarvisStore((s) => s.hnStories)
+  const chatHistory = useJarvisStore((s) => s.chatHistory)
+  const voiceState = useJarvisStore((s) => s.voiceState)
+  const fetchWorldEvents = useJarvisStore((s) => s.fetchWorldEvents)
+  const weather = useJarvisStore((s) => s.weather)
+  const fetchWeather = useJarvisStore((s) => s.fetchWeather)
+  const mapOpen = useJarvisStore((s) => s.mapOpen)
 
   const [vaultLine, setVaultLine] = useState('')
   const [dockInput, setDockInput] = useState('')
@@ -138,9 +153,16 @@ export default function DashboardPanel() {
   const [researchBusy, setResearchBusy] = useState(false)
   const [speakingBrief, setSpeakingBrief] = useState(false)
   const [dockBusy, setDockBusy] = useState(false)
+  const [now, setNow] = useState(null)
 
   const ingestGitHub = useJarvisStore((s) => s.ingestGitHub)
   const pollIngestStatus = useJarvisStore((s) => s.pollIngestStatus)
+
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   const refreshDemos = useCallback(async () => {
     try {
@@ -163,6 +185,8 @@ export default function DashboardPanel() {
       fetchVaultStatus()
       fetchVaultNotes()
       refreshDemos()
+      fetchWorldEvents()
+      fetchWeather()
       const state = useJarvisStore.getState()
       setFocusDraft(
         state.contextState?.active_project && state.contextState.active_project !== 'unset'
@@ -187,6 +211,8 @@ export default function DashboardPanel() {
     fetchGraph,
     fetchVaultNotes,
     fetchVaultStatus,
+    fetchWorldEvents,
+    fetchWeather,
     ingestGitHub,
     pollIngestStatus,
     refreshDemos,
@@ -215,10 +241,9 @@ export default function DashboardPanel() {
     focusRepo ||
     activeProject
   const repoSuggestions = (repos || [])
-    .slice(0, 8)
+    .slice(0, 24)
     .map((r) => r.name)
     .filter(Boolean)
-  const pulseCount = (graphProjection?.pulses || []).length
   const demoNodeCount = (graphProjection?.nodes || []).filter((n) => n.type === 'demo').length
   const demoCount = Math.max(demos.length, demoNodeCount)
 
@@ -267,7 +292,7 @@ export default function DashboardPanel() {
             preferBrowser: true,
             browserOnly: true,
             lang: 'en-US',
-            rate: 1.08,
+            rate: 1.32,
             voiceMatchers: AMERICAN_VOICE_MATCHERS,
           })
           setVoiceState('idle')
@@ -291,7 +316,7 @@ export default function DashboardPanel() {
 
       const speaker = createStreamingSpeaker({
         lang: 'en-US',
-        rate: 1.08,
+            rate: 1.32,
         voiceMatchers: AMERICAN_VOICE_MATCHERS,
         onStart: () => setVoiceState('speaking'),
         onEnd: () => setVoiceState('idle'),
@@ -333,7 +358,7 @@ export default function DashboardPanel() {
     setDockBusy(true)
     const speaker = createStreamingSpeaker({
       lang: 'en-US',
-      rate: 1.08,
+            rate: 1.32,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,
       onStart: () => setVoiceState('speaking'),
       onEnd: () => setVoiceState('idle'),
@@ -365,7 +390,7 @@ export default function DashboardPanel() {
       preferBrowser: true,
       preferBackend: false,
       browserOnly: true,
-      rate: 1.05,
+      rate: 1.32,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,
       onEnd: () => {
         setSpeakingBrief(false)
@@ -388,7 +413,7 @@ export default function DashboardPanel() {
     setDockInput('')
     const speaker = createStreamingSpeaker({
       lang: 'en-US',
-      rate: 1.05,
+      rate: 1.32,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,
       onStart: () => setVoiceState('speaking'),
       onEnd: () => setVoiceState('idle'),
@@ -419,545 +444,293 @@ export default function DashboardPanel() {
     setActivePanel(panel)
   }
 
+  const hour = now ? now.getHours() : 12
+  const greet = hour < 12 ? 'GOOD MORNING' : hour < 18 ? 'GOOD AFTERNOON' : 'GOOD EVENING'
+  const localClock = now
+    ? now.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:--:--'
+  const online = llmOnline(healthState)
+  const bits = [healthState.groq, healthState.ollama, healthState.qdrant, vaultOk, (infraStatus.sites?.up || 0) > 0]
+  const healthPct = Math.round((bits.filter(Boolean).length / bits.length) * 100)
+  const nodeCount = (graphProjection?.nodes || []).length
+  const pulseCount = (graphProjection?.pulses || []).length
+  const repoCount = (repos || []).length
+  const newsItems = (worldEvents?.news || []).slice(0, 8)
+  const hnItems = (hnStories || []).slice(0, 8)
+  const feed = newsItems.length ? newsItems : hnItems
+  const hotspots = (worldEvents?.hotspots || []).slice(0, 5)
+  const logs = [...(chatHistory || [])].slice(-6).reverse()
+  const groqPct = healthState.groq ? 86 : 8
+  const ollamaPct = healthState.ollama ? 62 : 4
+  const qdrantPct = healthState.qdrant ? 74 : 6
+  const vaultPct = vaultOk ? 90 : 10
+  const netPct = Math.min(100, ((infraStatus.sites?.up || 0) / Math.max(1, infraStatus.sites?.total || 1)) * 100)
+  const dockerPct = Math.min(100, ((infraStatus.docker?.running || 0) / Math.max(1, infraStatus.docker?.total || 1)) * 100)
+
+  const Bar = ({ label, value }) => (
+    <div className="mk7-bar">
+      <span>{label}</span>
+      <i>
+        <b style={{ width: `${Math.max(4, Math.min(100, value))}%` }} />
+      </i>
+      <span>{Math.round(value)}</span>
+    </div>
+  )
+
   return (
-    <div className="cinematic-dash" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-void)' }}>
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-        <Suspense fallback={<BrainLoading />}>
-          <BrainGraph hudInset={{ left: 336, bottom: 78, maxWidth: 280 }} />
-        </Suspense>
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background:
-              'radial-gradient(ellipse at center, transparent 50%, rgba(2,8,16,0.3) 75%, rgba(2,8,16,0.75) 100%)',
-            pointerEvents: 'none',
-          }}
-        />
-        {/* Radar sweep + centerpiece glow behind the memory core */}
-        <div aria-hidden className="dash-radar-sweep" />
-        <div aria-hidden className="dash-centerpiece-glow" />
-        {/* Arc-reactor ring frame around the memory core */}
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 'min(62vh, 640px)',
-            height: 'min(62vh, 640px)',
-            pointerEvents: 'none',
-            zIndex: 1,
-            opacity: 0.5,
-          }}
-        >
-          <div className="arc-ring arc-ring--arcs" style={{ animationDuration: '48s' }} />
-          <div className="arc-ring arc-ring--ticks" style={{ inset: '4%', animationDuration: '90s' }} />
-          <div className="arc-ring arc-ring--dashed" style={{ inset: '9%', animationDuration: '64s' }} />
+    <div className="mk7-dash">
+      <header className="mk7-top">
+        <div className="mk7-greet">
+          {greet}, SIDDARTH
+          <small>{online ? 'SYSTEM ONLINE & OPTIMAL' : 'SYSTEM DEGRADED · LLM PATH CHECK'}</small>
         </div>
-        {/* Targeting reticle crosshair ticks */}
-        <div aria-hidden className="reticle-pulse" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
-          <div style={{ position: 'absolute', top: '50%', left: 'calc(50% - min(34vh, 352px))', width: 22, height: 1, background: 'rgba(0,217,255,0.55)' }} />
-          <div style={{ position: 'absolute', top: '50%', right: 'calc(50% - min(34vh, 352px))', width: 22, height: 1, background: 'rgba(0,217,255,0.55)' }} />
-          <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - min(34vh, 352px))', height: 22, width: 1, background: 'rgba(0,217,255,0.55)' }} />
-          <div style={{ position: 'absolute', left: '50%', bottom: 'calc(50% - min(34vh, 352px))', height: 22, width: 1, background: 'rgba(0,217,255,0.55)' }} />
-        </div>
-        <div
-          className="decode-text"
-          style={{
-            position: 'absolute',
-            top: '15%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontFamily: 'var(--font-display)',
-            fontSize: '11px',
-            letterSpacing: '0.42em',
-            color: 'var(--cyan)',
-            opacity: 0.55,
-            pointerEvents: 'none',
-            zIndex: 1,
-            textAlign: 'center',
-            textShadow: '0 0 12px rgba(0,217,255,0.5)',
-          }}
+        <nav className="mk7-nav">
+          <button type="button" className="is-on" onClick={() => { window.location.hash = '#home' }}>MAIN SYSTEMS</button>
+          <button type="button" onClick={() => { window.location.hash = '#graph' }}>NEURAL NETWORK</button>
+          <button type="button" onClick={() => { window.location.hash = '#intel' }}>DATA ANALYTICS</button>
+          <button type="button" onClick={() => { window.location.hash = '#vision' }}>HOLOGRAPHIC UI</button>
+          <button type="button" onClick={() => { window.location.hash = '#infra' }}>SYSTEM MONITOR</button>
+          <button type="button" onClick={() => { window.location.hash = '#vault' }}>SECURITY GRID</button>
+        </nav>
+        <button
+          type="button"
+          className="mk7-greet mk7-home"
+          onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_go_home' })}
+          title="Home"
         >
-          NEURAL MEMORY CORE
-          <div style={{ marginTop: 7, fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.2em', opacity: 0.85 }}>
-            {pulseCount} PULSES · {demoNodeCount} DEMOS
+          J.A.R.V.I.S.
+          <small>{healthPct}% HEALTH · {localClock}</small>
+        </button>
+      </header>
+
+      <div className="mk7-col">
+        <section className="mk7-card">
+          <h3>SYSTEM OVERVIEW</h3>
+          <div className="mk7-gauge">{bits.filter(Boolean).length}/{bits.length}</div>
+          <div className="mk7-row"><span>SERVICES</span><span>LIVE</span></div>
+          <Bar label="GROQ" value={groqPct} />
+          <Bar label="OLLAMA" value={ollamaPct} />
+          <Bar label="QDRANT" value={qdrantPct} />
+          <Bar label="VAULT" value={vaultPct} />
+          <Bar label="NET" value={netPct} />
+        </section>
+        <section
+          className="mk7-card mk7-card--wx"
+          role="button"
+          tabIndex={0}
+          onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_show_weather' })}
+          style={{ cursor: 'pointer' }}
+        >
+          <h3>WEATHER · BLR</h3>
+          <div className="mk7-row"><span>TEMP</span><span>{weather?.temp != null ? `${Math.round(weather.temp)}°C` : '—'}</span></div>
+          <div className="mk7-row"><span>HUMIDITY</span><span>{weather?.humidity != null ? `${weather.humidity}%` : '—'}</span></div>
+          <div className="mk7-row"><span>WIND</span><span>{weather?.wind != null ? `${weather.wind} km/h` : '—'}</span></div>
+        </section>
+        <section className="mk7-card">
+          <h3>NETWORK STATUS</h3>
+          <div className="mk7-row"><span>SITES UP</span><span>{infraStatus.sites?.up || 0}/{infraStatus.sites?.total || 0}</span></div>
+          <div className="mk7-row"><span>DOWN</span><span>{infraStatus.sites?.down || 0}</span></div>
+          <div className="mk7-row"><span>KEYS ARMED</span><span>{(intelArmory?.keys || []).filter((k) => k.armed).length}</span></div>
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%', marginTop: 6 }} onClick={() => goLab('infra')}>OPEN INFRA</button>
+        </section>
+        <section className="mk7-card mk7-map-thumb">
+          <h3>LIVE MAP · BLR 12.97N</h3>
+          <div className="mk7-map-thumb-body">
+            <WorldMap2D mini expandable />
           </div>
-        </div>
-        <div aria-hidden className="core-telemetry core-telemetry--nw">
-          <span>NEURAL LINK</span>
-          <strong>{healthState.qdrant ? 'SYNCED' : 'STANDBY'}</strong>
-        </div>
-        <div aria-hidden className="core-telemetry core-telemetry--ne">
-          <span>ACTIVE MODEL</span>
-          <strong>{String(primary).toUpperCase()}</strong>
-        </div>
-        <div aria-hidden className="core-telemetry core-telemetry--sw">
-          <span>MEMORY PULSES</span>
-          <strong>{String(pulseCount).padStart(3, '0')}</strong>
-        </div>
-        <div aria-hidden className="core-telemetry core-telemetry--se">
-          <span>BUILDS INDEXED</span>
-          <strong>{String(demoCount).padStart(3, '0')}</strong>
-        </div>
-      </div>
-
-      {/* Attention strip */}
-      <div
-        className="cinematic-status-strip"
-        style={{
-          ...glass,
-          position: 'absolute',
-          top: 12,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 4,
-          width: 'min(920px, calc(100% - 580px))',
-          padding: '8px 10px',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 8,
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'auto',
-          background: 'linear-gradient(180deg, rgba(2, 14, 26, 0.78), rgba(2, 8, 16, 0.72))',
-        }}
-      >
-        <AttentionChip label="GROQ" ok={Boolean(healthState.groq)} detail={String(model).split('/').pop()?.slice(0, 14)} />
-        <AttentionChip label="RESEARCH" ok={Boolean(healthState.groq)} detail="compound" onClick={() => setDockInput('Research ')} />
-        <AttentionChip label="VISION" ok={Boolean(healthState.groq)} detail="qwen" onClick={() => goLab('vision')} />
-        <AttentionChip label="DEMOS" ok={demoCount > 0} detail={String(demoCount)} onClick={() => goLab('demos')} />
-        <AttentionChip
-          label="INFRA"
-          ok={(infraStatus.sites?.down || 0) === 0 && (infraStatus.docker?.unhealthy || 0) === 0}
-          detail={`${infraStatus.sites?.up || 0}S/${infraStatus.docker?.running || 0}C`}
-          onClick={() => goLab('infra')}
-        />
-        <AttentionChip label="QDRANT" ok={Boolean(healthState.qdrant)} />
-        <AttentionChip label="VAULT" ok={vaultOk} />
-        <AttentionChip label="HOUSE" ok={false} detail="PARKED" />
-        <AttentionChip label="CAL" ok={Boolean(googleCalendar.connected)} onClick={() => goWork('calendar')} />
-      </div>
-
-      {/* Left rail */}
-      <aside
-        className="left-panel holo-corners boot-in cinematic-module-stack cinematic-module-stack--left"
-        style={{
-          ...glass,
-          position: 'absolute',
-          top: 14,
-          left: 14,
-          bottom: 14,
-          width: 308,
-          maxHeight: 'calc(100% - 28px)',
-          zIndex: 2,
-          overflowY: 'auto',
-          pointerEvents: 'auto',
-        }}
-      >
-        <div className="left-panel-section">
-          <SectionLabel>Systems</SectionLabel>
-          <StatusRow label="Groq" ok={Boolean(healthState.groq)} detail={healthState.groq ? 'Active' : 'Offline'} />
-          <StatusRow
-            label="Ollama"
-            ok={Boolean(healthState.ollama)}
-            standby={!healthState.ollama && Boolean(healthState.groq)}
-            detail={healthState.ollama ? 'Online' : healthState.groq ? 'Standby' : 'Offline'}
-          />
-          <StatusRow label="Qdrant" ok={Boolean(healthState.qdrant)} />
-          <StatusRow label="Vault" ok={vaultOk} />
-          <StatusRow label="House" ok={false} detail="Parked" />
-        </div>
-
-        <div className="left-panel-section">
-          <SectionLabel>Models</SectionLabel>
-          <div className="left-kv">
-            <div className="left-kv-row">
-              <span className="left-kv-key">Primary</span>
-              <span className="left-kv-val">{String(primary).toUpperCase()}</span>
-            </div>
-            <div className="left-kv-row">
-              <span className="left-kv-key">Chat</span>
-              <span className="left-kv-val">{model}</span>
-            </div>
-            <div className="left-kv-row">
-              <span className="left-kv-key">Research</span>
-              <span className="left-kv-val">{researchModel}</span>
-            </div>
-            {llm.last_provider ? (
-              <div className="left-kv-row">
-                <span className="left-kv-key">Last</span>
-                <span className="left-kv-val">{String(llm.last_provider)}</span>
+        </section>
+        <section className="mk7-card mk7-card--fill">
+          <h3>MISSION</h3>
+          {nextEvents.length === 0 ? (
+            <div className="mk7-log">{googleCalendar.connected ? 'No upcoming events' : 'Calendar offline'}</div>
+          ) : (
+            nextEvents.slice(0, 3).map((ev) => (
+              <div key={ev.id || ev.summary} className="mk7-row">
+                <span>{(ev.summary || 'Event').slice(0, 16)}</span>
+                <span>{formatWhen(ev)}</span>
               </div>
-            ) : null}
-          </div>
-        </div>
+            ))
+          )}
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%', marginTop: 6 }} onClick={() => goWork('calendar')}>OPEN CAL</button>
+        </section>
+      </div>
 
-        <div className="left-panel-section" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <SectionLabel>Focus</SectionLabel>
-          <div className="left-focus-name">{chatFocus === 'unset' ? 'No project set' : chatFocus}</div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              saveFocus()
-            }}
-            style={{ display: 'flex', gap: 8, marginBottom: 12 }}
-          >
-            <input
-              className="input-cyber"
-              value={focusDraft}
-              onChange={(e) => setFocusDraft(e.target.value)}
-              placeholder="Active project…"
-              list="focus-repo-suggestions"
-              style={{ flex: 1, fontSize: 14, padding: '10px 12px', fontFamily: 'var(--font-body)' }}
-            />
-            <datalist id="focus-repo-suggestions">
-              {repoSuggestions.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <button type="submit" className="btn" disabled={savingFocus || !focusDraft.trim()} style={{ fontSize: 12 }}>
-              Set
+      <div className="mk7-center">
+        {mapOpen || stageHardware || stageProject || selectedNode?.type === 'weather' ? (
+          <div className="mk7-center-hold" />
+        ) : (
+          <div className="mk7-graph-well">
+            <button
+              type="button"
+              className="mk7-online"
+              onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_go_home' })}
+            >
+              JARVIS ONLINE
             </button>
-          </form>
-          <div className="scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-            {repoSuggestions.slice(0, 6).map((name) => (
-              <button
-                key={name}
-                type="button"
-                className={`left-list-btn${name === activeProject ? ' is-active' : ''}`}
-                onClick={() => saveFocus(name)}
-              >
-                {name}
-              </button>
-            ))}
+            <Suspense fallback={<BrainLoading />}>
+              <BrainGraph compact />
+            </Suspense>
           </div>
-        </div>
-      </aside>
+        )}
+      </div>
 
-      {/* Right rail */}
-      <aside
-        className="left-panel holo-corners boot-in cinematic-module-stack cinematic-module-stack--right"
-        style={{
-          ...glass,
-          position: 'absolute',
-          top: 14,
-          right: 14,
-          bottom: 14,
-          width: 292,
-          maxHeight: 'calc(100% - 28px)',
-          zIndex: 2,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          pointerEvents: 'auto',
-        }}
-      >
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Brief</SectionLabel>
-          <div className="left-panel-meta" style={{ marginBottom: 10 }}>
-            {brief?.date || '—'}
-          </div>
-          <div
-            style={{
-              maxHeight: 110,
-              minHeight: 0,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              marginBottom: 12,
-              paddingRight: 4,
-            }}
-          >
-            {priorities.length === 0 ? (
-              <div className="left-status-detail">No priorities</div>
+      <div className="mk7-col">
+        <section className="mk7-card mk7-card--fill mk7-card--news">
+          <h3>LIVE NEWS</h3>
+          <div className="mk7-log mk7-log--fill">
+            {feed.length === 0 ? (
+              <div>No live headlines yet</div>
             ) : (
-              priorities.map((item, i) => (
-                <div key={i} className="left-status-row" style={{ alignItems: 'flex-start' }}>
-                  <span className="left-kv-key" style={{ width: 28, gridColumn: 'auto' }}>
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <span className="left-kv-val" style={{ fontSize: 14 }}>
-                    {typeof item === 'string' ? item : item?.text || item?.title || String(item)}
-                  </span>
-                </div>
+              feed.slice(0, 8).map((n, i) => (
+                <a
+                  key={n.url || n.id || i}
+                  href={n.url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mk7-news-line"
+                >
+                  {(n.title || n.headline || '').slice(0, 72)}
+                </a>
               ))
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="btn" style={{ fontSize: 12, flex: 1 }} onClick={() => goWork('brief')}>
-              Open
-            </button>
-            <button type="button" className="btn" style={{ fontSize: 12, flex: 1 }} disabled={speakingBrief} onClick={readBriefAloud}>
-              {speakingBrief ? '…' : 'Read'}
-            </button>
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%', marginTop: 6 }} onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_open_map' })}>MAP LOCKS</button>
+        </section>
+        <section className="mk7-card">
+          <h3>SYSTEM MONITOR</h3>
+          <div className="mk7-row"><span>GROQ</span><span>{healthState.groq ? 'ONLINE' : 'DARK'}</span></div>
+          <div className="mk7-row"><span>OLLAMA</span><span>{healthState.ollama ? 'ONLINE' : 'DARK'}</span></div>
+          <div className="mk7-row"><span>QDRANT</span><span>{healthState.qdrant ? 'ONLINE' : 'DARK'}</span></div>
+          <div className="mk7-row"><span>SITES</span><span>{infraStatus.sites?.up || 0} / {infraStatus.sites?.total || 0} UP</span></div>
+          <div className="mk7-row"><span>DOCKER</span><span>{infraStatus.docker?.running || 0} / {infraStatus.docker?.total || 0} RUN</span></div>
+          <div className="mk7-row"><span>REPOS</span><span>{repoCount}</span></div>
+          <div className="mk7-row"><span>GRAPH</span><span>{nodeCount} NODES</span></div>
+          <div className="mk7-row"><span>LLM</span><span>{String(primary).toUpperCase()}</span></div>
+        </section>
+        <section className="mk7-card">
+          <h3>CRAFT</h3>
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%', marginBottom: 4 }} onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_show_hardware', params: { id: 'quad' } })}>QUAD · KK2.1.5</button>
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%' }} onClick={() => useJarvisStore.getState().applyUiCommand({ type: 'ui_show_hardware', params: { id: 'hex' } })}>HEX · F550 NAZA</button>
+        </section>
+        <section className="mk7-card">
+          <h3>VOICE · LOG</h3>
+          <div className="mk7-wave" style={{ opacity: voiceState === 'idle' ? 0.35 : 1, height: 22 }}>
+            {Array.from({ length: 14 }).map((_, i) => (
+              <span key={i} style={{ animationDelay: `${i * 0.06}s`, height: 18 }} />
+            ))}
           </div>
-        </div>
+          <div className="mk7-log">
+            {logs.length === 0 ? <div>{statusMsg}</div> : logs.slice(0, 3).map((m, i) => (
+              <div key={m.ts || i}>{(m.role || 'sys').slice(0, 3).toUpperCase()} · {String(m.content || '').slice(0, 42)}</div>
+            ))}
+          </div>
+          <button type="button" className="btn" style={{ fontSize: 11, width: '100%', marginTop: 6 }} onClick={() => goWork('voice')}>PTT</button>
+        </section>
+        <section className="mk7-card">
+          <h3>BRIEF</h3>
+          {(priorities || []).slice(0, 2).map((item, i) => (
+            <div key={i} className="mk7-log">{typeof item === 'string' ? item : item?.text || item?.title}</div>
+          ))}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button type="button" className="btn" style={{ fontSize: 11, flex: 1 }} onClick={() => goWork('brief')}>OPEN</button>
+            <button type="button" className="btn" style={{ fontSize: 11, flex: 1 }} disabled={speakingBrief} onClick={readBriefAloud}>{speakingBrief ? '…' : 'READ'}</button>
+          </div>
+        </section>
+      </div>
 
-        <div className="left-panel-section dash-infra-summary" style={{ flexShrink: 0 }}>
-          <SectionLabel>Infrastructure</SectionLabel>
-          <button type="button" onClick={() => goLab('infra')}><span>Sites online</span><strong>{infraStatus.sites?.up || 0}/{infraStatus.sites?.total || 0}</strong></button>
-          <button type="button" className={infraStatus.sites?.down ? 'is-alert' : ''} onClick={() => goLab('infra')}><span>Incidents</span><strong>{infraStatus.sites?.down || 0}</strong></button>
-          <button type="button" onClick={() => goLab('infra')}><span>Containers</span><strong>{infraStatus.docker?.running || 0}/{infraStatus.docker?.total || 0}</strong></button>
-          <button type="button" className={infraStatus.docker?.unhealthy ? 'is-alert' : ''} onClick={() => goLab('infra')}><span>Unhealthy</span><strong>{infraStatus.docker?.unhealthy || 0}</strong></button>
+      <div className="mk7-console">
+        <div className="mk7-console-static">
+          <label>
+            PROJECT
+            <select
+              value={repoSuggestions.includes(String(activeProject)) ? activeProject : ''}
+              onChange={(e) => {
+                const name = e.target.value
+                if (name) void saveFocus(name)
+              }}
+            >
+              <option value="">{activeProject && activeProject !== 'unset' ? activeProject : 'SELECT'}</option>
+              {repoSuggestions.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </label>
+          <span>IST {localClock}</span>
+          <span>GROQ {healthState.groq ? 'ON' : 'OFF'}</span>
+          <span>SITES {infraStatus.sites?.up || 0}/{infraStatus.sites?.total || 0}</span>
         </div>
-
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Next up</SectionLabel>
-          {nextEvents.length === 0 ? (
-            <div className="left-panel-meta" style={{ marginBottom: 0 }}>
-              {googleCalendar.connected ? 'No upcoming events' : 'Calendar offline'}
-            </div>
-          ) : (
-            nextEvents.slice(0, 2).map((ev) => (
-              <div key={ev.id || `${ev.summary}-${ev.start}`} style={{ marginBottom: 10 }}>
-                <div className="left-status-name" style={{ fontSize: 14 }}>
-                  {ev.summary || 'Untitled'}
-                </div>
-                <div className="left-status-detail">{formatWhen(ev)}</div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Demos</SectionLabel>
-          {demos.length === 0 ? (
-            <div className="left-panel-meta">Ask dock: build me a website for…</div>
-          ) : (
-            demos.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                className="left-list-btn"
-                onClick={() => {
-                  openDemo(d.id)
-                  goLab('demos')
-                }}
-              >
-                {d.title || d.id}
-                <span className="left-list-sub">{d.kit}</span>
-              </button>
-            ))
-          )}
-          <button type="button" className="btn" style={{ fontSize: 12, width: '100%', marginTop: 8 }} onClick={() => goLab('demos')}>
-            Open demos
+        <div className="mk7-console-stats">
+          <b>{bits.filter(Boolean).length}/{bits.length}</b>
+          <span>SERVICES</span>
+          <b>{repoCount}</b>
+          <span>REPOS</span>
+          <b>{nodeCount}</b>
+          <span>GRAPH</span>
+          <b>{vaultOk ? 'LOCK' : 'OPEN'}</b>
+          <span>VAULT</span>
+          <button type="button" className={gestureControlEnabled ? 'is-on' : ''} onClick={() => void toggleGestures()}>
+            PALM {gestureControlEnabled ? 'ON' : 'OFF'}
           </button>
         </div>
+        <form className="mk7-dock mk7-console-cmd" onSubmit={handleDockSubmit}>
+          <span>&gt;</span>
+          <input value={dockInput} onChange={(e) => setDockInput(e.target.value)} placeholder="COMMAND · ask · research · #map · show hex…" />
+          <button type="submit" className="btn" disabled={!dockInput.trim() || dockBusy} style={{ fontSize: 11 }}>{dockBusy ? '…' : 'EXE'}</button>
+          <button type="button" className="btn" style={{ fontSize: 11 }} disabled={researchBusy} onClick={runQuickResearch}>RSH</button>
+          <button type="button" className="btn" style={{ fontSize: 11 }} onClick={() => goWork('voice')}>PTT</button>
+        </form>
+      </div>
 
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Research</SectionLabel>
-          <div className="left-panel-meta">Topic in the dock → Research. Saves to vault Reports.</div>
-          <button type="button" className="btn" style={{ fontSize: 12, width: '100%' }} disabled={researchBusy} onClick={runQuickResearch}>
-            {researchBusy ? 'Researching…' : 'Research topic'}
-          </button>
-        </div>
-
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Capture</SectionLabel>
-          <form onSubmit={handleVaultCapture} style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="input-cyber"
-              value={vaultLine}
-              onChange={(e) => setVaultLine(e.target.value)}
-              placeholder="One-line → vault"
-              style={{ flex: 1, fontSize: 14, padding: '10px 12px', minWidth: 0, fontFamily: 'var(--font-body)' }}
-            />
-            <button type="submit" className="btn" disabled={savingVault || !vaultLine.trim()} style={{ fontSize: 12 }}>
-              Save
-            </button>
-          </form>
-        </div>
-
-        <div className="left-panel-section" style={{ flexShrink: 0 }}>
-          <SectionLabel>Commands</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goWork('chat')}>
-              Chat
-            </button>
-            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goLab('demos')}>
-              Demos
-            </button>
-            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goWork('voice')}>
-              Voice
-            </button>
-            <button type="button" className="btn" style={{ fontSize: 12, padding: '10px 6px' }} onClick={() => goLab('vision')}>
-              Vision
-            </button>
-            <button
-              type="button"
-              className="btn"
-              style={{
-                fontSize: 12,
-                padding: '10px 6px',
-                borderColor: wakeEnabled ? 'var(--gold)' : undefined,
-                color: wakeEnabled ? 'var(--gold)' : undefined,
-                textShadow: wakeEnabled ? '0 0 8px rgba(255,184,0,0.5)' : undefined,
-              }}
-              onClick={() => setWakeEnabled(!wakeEnabled)}
-            >
-              {wakeEnabled ? 'Wake on' : 'Wake'}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              style={{
-                fontSize: 12,
-                padding: '10px 6px',
-                borderColor: gestureControlEnabled ? 'var(--gold)' : undefined,
-                color: gestureControlEnabled ? 'var(--gold)' : undefined,
-                textShadow: gestureControlEnabled ? '0 0 8px rgba(255,184,0,0.5)' : undefined,
-              }}
-              onClick={() => {
-                void toggleGestures()
-              }}
-            >
-              Gesture
-            </button>
+      {mapOpen ? (
+        <div className="mk7-stage">
+          <header>
+            <span>LIVE MAP · #map</span>
+            <button type="button" className="btn" style={{ fontSize: 11 }} onClick={() => useJarvisStore.setState({ mapOpen: false, selectedNode: null })}>CLOSE</button>
+          </header>
+          <div className="mk7-stage-body">
+            <WorldMap2D legend />
+            <p className="mk7-stage-hint">Scroll to zoom · drag to pan · pinch / palm when gestures are on · click a red lock for the brief</p>
           </div>
-          {gestureControlEnabled ? (
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: 12, width: '100%', marginTop: 8 }}
-              onClick={() => setGesturePreviewVisible(!gesturePreviewVisible)}
-            >
-              {gesturePreviewVisible ? 'Hide hand cam' : 'Show hand cam'}
-            </button>
-          ) : null}
-          <div className="left-panel-meta" style={{ marginTop: 12, marginBottom: 0 }}>
-            Wake: {wakeEnabled ? String(wakeStatus || 'armed').replace(/_/g, ' ') : 'off'}
-          </div>
-        </div>
-
-        <div className="left-panel-meta" style={{ marginTop: 'auto', paddingTop: 14, marginBottom: 0 }}>
-          {statusMsg}
-        </div>
-      </aside>
-
-      {selectedNode ? (
-        <div
-          className="holo-corners boot-in reticle-pulse"
-          style={{
-            ...glass,
-            position: 'absolute',
-            left: '50%',
-            bottom: 78,
-            transform: 'translateX(-50%)',
-            zIndex: 3,
-            width: 'min(640px, calc(100% - 580px))',
-            padding: '10px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            pointerEvents: 'auto',
-            borderColor: 'rgba(0, 217, 255, 0.45)',
-          }}
-        >
-          <span aria-hidden style={{ color: 'var(--cyan)', fontFamily: 'var(--font-mono)', fontSize: 16, textShadow: '0 0 8px rgba(0,217,255,0.6)' }}>
-            ◎
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 10, letterSpacing: '0.28em', color: 'var(--cyan)', marginBottom: 3, textShadow: '0 0 8px rgba(0,217,255,0.5)' }}>
-              TARGET LOCK · {String(selectedNode.type || 'node').toUpperCase()}
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 15,
-                color: 'var(--text-primary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {selectedNode.label || selectedNode.id}
-            </div>
-          </div>
-          <button type="button" className="btn" style={{ fontSize: 13 }} onClick={handleAskNode} disabled={dockBusy}>
-            {['demo', 'site', 'container'].includes(selectedNode.type) ? 'OPEN' : 'ASK'}
-          </button>
         </div>
       ) : null}
 
-      {/* Ask dock — live speak */}
-      <div
-        className="dock-shell cinematic-command-deck"
-        style={{
-          position: 'absolute',
-          left: '50%',
-          bottom: 28,
-          transform: 'translateX(-50%)',
-          zIndex: 3,
-          width: 'min(720px, calc(100% - 620px))',
-          padding: '12px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          pointerEvents: 'auto',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 16,
-            color: 'var(--cyan)',
-            textShadow: '0 0 8px rgba(0,217,255,0.6)',
-            flexShrink: 0,
-          }}
-        >
-          &gt;
-        </span>
-        <form onSubmit={handleDockSubmit} style={{ flex: 1, display: 'flex', gap: 8 }}>
-          <input
-            className="input-cyber"
-            value={dockInput}
-            onChange={(e) => setDockInput(e.target.value)}
-            placeholder="AWAITING COMMAND · ask · research · build a website…"
-            style={{
-              flex: 1,
-              fontSize: 14,
-              padding: '12px 14px',
-              fontFamily: 'var(--font-mono)',
-              letterSpacing: '0.04em',
-              background: 'transparent',
-              border: 'none',
-              boxShadow: 'none',
-            }}
-          />
-          <button type="submit" className="btn" disabled={!dockInput.trim() || dockBusy} style={{ fontSize: 13 }}>
-            {dockBusy ? '…' : 'EXECUTE'}
-          </button>
-        </form>
-        <button type="button" className="btn" style={{ fontSize: 12 }} disabled={researchBusy} onClick={runQuickResearch}>
-          Research
-        </button>
-        <button type="button" className="btn" style={{ fontSize: 12 }} onClick={() => goWork('voice')}>
-          PTT
-        </button>
-      </div>
-      <div
-        className="decode-text"
-        style={{
-          position: 'absolute',
-          left: '50%',
-          bottom: 8,
-          transform: 'translateX(-50%)',
-          zIndex: 3,
-          width: 'min(720px, calc(100% - 620px))',
-          fontFamily: 'var(--font-mono)',
-          fontSize: 10,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--text-dim)',
-          textAlign: 'center',
-          pointerEvents: 'none',
-          opacity: 0.85,
-        }}
-      >
-        Hold Space · say &quot;Jarvis&quot; · open demos · research … · voice commands
-      </div>
+      {selectedNode?.type === 'weather' && !stageHardware && !stageProject ? (
+        <div className="mk7-stage">
+          <header>
+            <span>WEATHER · BANGALORE · #n/weather</span>
+            <button type="button" className="btn" style={{ fontSize: 11 }} onClick={() => useJarvisStore.setState({ selectedNode: null })}>CLOSE</button>
+          </header>
+          <div className="mk7-stage-project">
+            <p>Open-Meteo live reading for 12.97 N 77.59 E. Not a forecast product — HUD telemetry only.</p>
+            <dl>
+              <dt>TEMP</dt><dd>{weather?.temp != null ? `${weather.temp} ${weather.unit}` : 'fetching…'}</dd>
+              <dt>HUMIDITY</dt><dd>{weather?.humidity != null ? `${weather.humidity}%` : '—'}</dd>
+              <dt>WIND</dt><dd>{weather?.wind != null ? `${weather.wind} km/h` : '—'}</dd>
+            </dl>
+          </div>
+        </div>
+      ) : null}
+
+      {stageHardware ? (
+        <div className="mk7-stage">
+          <header>
+            <span>CRAFT · {stageHardware === 'hex' ? 'HEX F550 / NAZA-M LITE' : 'QUAD KK2.1.5'} · #n/{stageHardware}</span>
+            <button type="button" className="btn" style={{ fontSize: 11 }} onClick={() => useJarvisStore.setState({ stageHardware: null, selectedNode: null })}>CLOSE</button>
+          </header>
+          <div className="mk7-stage-body">
+            <PlexusCraft kind={stageHardware === 'hex' ? 'hex' : 'quad'} height="100%" interactive />
+            <p className="mk7-stage-hint">Click a part to pull it off. EXPLODE / ASSEMBLE. Say remove the battery. Palm to orbit.</p>
+          </div>
+        </div>
+      ) : null}
+
+      {stageProject && !stageHardware && !mapOpen ? (
+        <ProjectDossier
+          project={stageProject}
+          onAsk={handleAskNode}
+          onClose={() => useJarvisStore.setState({ stageProject: null, selectedNode: null })}
+        />
+      ) : null}
     </div>
   )
 }

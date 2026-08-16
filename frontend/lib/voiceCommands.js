@@ -61,8 +61,94 @@ export function parseVoiceCommand(raw = '') {
   if (/\b(open |go to |show |switch to )?(the )?work( mode| space)?\b/.test(text) && !/\b(work on|workout)\b/.test(text)) {
     return { type: 'navigate', shell: 'work', panel: 'chat', ack: 'Opening work.' }
   }
+  if (/\b(open |go to |show |switch to )?(the )?intel\b/.test(text)) {
+    return { type: 'navigate', shell: 'lab', panel: 'intel', ack: 'Opening intel theater.' }
+  }
+  if (/\b(go )?home\b/.test(text) || /\bclose (the )?(map|overlay|stage)\b/.test(text)) {
+    return { type: 'ui_home', ack: 'Home.' }
+  }
+  if (/\bzoom in\b/.test(text) || /\bcloser\b/.test(text) && /\bmap\b/.test(text)) {
+    return { type: 'ui_map_scale', dir: 1, ack: 'Zooming in.' }
+  }
+  if (/\bzoom out\b/.test(text) || /\b(pull back|wider)\b/.test(text) && /\bmap\b/.test(text)) {
+    return { type: 'ui_map_scale', dir: -1, ack: 'Zooming out.' }
+  }
+  if (/\b(show |open )?(the )?(weather|bangalore weather|blr weather)\b/.test(text)) {
+    return { type: 'ui_weather', ack: 'Bangalore weather.' }
+  }
+  if (/\b(show |open )?(live )?news\b/.test(text) || /\bheadlines\b/.test(text)) {
+    return { type: 'ui_map', region: 'world', ack: 'Opening the map. Click a lock for the brief.' }
+  }
+  if (/\b(indian map|india map|map of india|zoom (in )?india|open india)\b/.test(text)) {
+    return { type: 'ui_map', region: 'india', ack: 'Focusing India.' }
+  }
+  if (/\b(world map|show the globe|open (the )?map)\b/.test(text)) {
+    return { type: 'ui_map', region: 'world', ack: 'World grid.' }
+  }
+  if (/\b(hex|naza|f550|hexcopter|hexacopter)\b/.test(text) && /\b(show|open|hologram|model)\b/.test(text)) {
+    return { type: 'ui_hw', id: 'hex', ack: 'Hexcopter hologram. NAZA-M Lite.' }
+  }
+  if (/\b(quad|kk2|quadcopter)\b/.test(text) && /\b(show|open|hologram|model)\b/.test(text)) {
+    return { type: 'ui_hw', id: 'quad', ack: 'Quad hologram. KK2.1.5.' }
+  }
+  if (/\b(explode|disassemble|pull apart|take apart)\b/.test(text)) {
+    return { type: 'ui_craft', action: 'explode', ack: 'Exploding the airframe.' }
+  }
+  if (/\b(assemble|put it back|rebuild|reassemble)\b/.test(text)) {
+    return { type: 'ui_craft', action: 'assemble', ack: 'Assembling.' }
+  }
+  if (/\b(add|install|fit|put on|seat)\b/.test(text) && /\b(cam|camera|vtx|led|buzzer|antenna|sonar|prop|motor|gps|battery)\b/.test(text)) {
+    const id = /\bcam|camera/.test(text)
+      ? 'cam'
+      : /\bvtx/.test(text)
+        ? 'vtx'
+        : /\bled/.test(text)
+          ? 'led'
+          : /\bbuzzer/.test(text)
+            ? 'buzzer'
+            : /\bantenna/.test(text)
+              ? 'antenna'
+              : /\bsonar/.test(text)
+                ? 'sonar'
+                : /\bprop/.test(text)
+                  ? 'props'
+                  : /\bmotor/.test(text)
+                    ? 'motors'
+                    : /\bgps/.test(text)
+                      ? 'gps'
+                      : 'battery'
+    return { type: 'ui_craft', action: 'install', id, ack: `Installing ${id}.` }
+  }
+  if (/\b(remove|strip|pull off|take off)\b/.test(text) && /\b(batter|prop|motor|naza|kk2|gps|arm|flight|cam|vtx|led)\b/.test(text)) {
+    const id = /\bbatter/.test(text)
+      ? 'battery'
+      : /\bprop/.test(text)
+        ? 'props'
+        : /\bmotor/.test(text)
+          ? 'motors'
+          : /\bnaza|kk2|flight/.test(text)
+            ? 'fc'
+            : /\bgps/.test(text)
+              ? 'gps'
+              : 'arms'
+    return { type: 'ui_craft', action: 'strip', id, ack: `Removing ${id}.` }
+  }
+  if (/\b(open|show|blueprint|project)\b/.test(text) && /\banima\b/.test(text)) {
+    return { type: 'ui_project', name: 'Anima', ack: 'Project Anima.' }
+  }
+  if (/\b(clear|dismiss|close panels?)\b/.test(text) && !/\bcalendar\b/.test(text)) {
+    return { type: 'hud_clear', ack: 'Clearing the HUD.' }
+  }
+  if (/\b(scan|sweep|lock)\b/.test(text) && /\b(for|on)?\s*([a-z0-9_.-]{2,})\b/.test(text)) {
+    const m = text.match(/\b(?:scan|sweep|lock)(?:\s+(?:for|on))?\s+([a-z0-9_.-]+)/i)
+    const topic = (m && m[1]) || ''
+    if (topic && !['the', 'my', 'a'].includes(topic)) {
+      return { type: 'intel_scan', topic, ack: `Scanning for ${topic}.` }
+    }
+  }
+
   if (/\b(open |go to |show |switch to )?(the )?lab\b/.test(text)) {
-    return { type: 'navigate', shell: 'lab', panel: 'demos', ack: 'Opening lab.' }
+    return { type: 'navigate', shell: 'lab', panel: 'intel', ack: 'Opening lab intel.' }
   }
 
   // Work panels
@@ -257,9 +343,7 @@ async function fetchBriefVoice() {
 
 function goShell(store, shell, panel) {
   if (shell === 'dashboard') {
-    store.setShellMode('dashboard')
-    store.setLayoutMode('dashboard')
-    store.setStatusMsg('DASHBOARD')
+    store.applyUiCommand({ type: 'ui_go_home' })
     return
   }
   if (shell === 'work') {
@@ -289,6 +373,46 @@ export async function applyVoiceCommand(cmd, getStore) {
     case 'navigate': {
       goShell(store, cmd.shell, cmd.panel)
       return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_map': {
+      store.applyUiCommand({ type: 'ui_zoom_map', params: { region: cmd.region } })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_map_scale': {
+      store.applyUiCommand({ type: 'ui_map_scale', params: { dir: cmd.dir } })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_weather': {
+      store.applyUiCommand({ type: 'ui_show_weather' })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_home': {
+      store.applyUiCommand({ type: 'ui_go_home' })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_craft': {
+      if (!store.stageHardware) {
+        store.applyUiCommand({ type: 'ui_show_hardware', params: { id: 'quad' } })
+      }
+      store.applyUiCommand({ type: 'ui_craft', params: { action: cmd.action, id: cmd.id } })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_hw': {
+      store.applyUiCommand({ type: 'ui_show_hardware', params: { id: cmd.id } })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'ui_project': {
+      store.applyUiCommand({ type: 'ui_open_project', params: { name: cmd.name } })
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'hud_clear': {
+      store.clearHud()
+      return { handled: true, speak: cmd.ack }
+    }
+    case 'intel_scan': {
+      await store.runLibraryScan(cmd.topic)
+      const n = (getStore().scanSweep?.hits || []).length
+      return { handled: true, speak: n ? `Locked ${n} repositories for ${cmd.topic}.` : `No lock for ${cmd.topic}.` }
     }
     case 'infra_status': {
       await store.fetchInfraStatus({ silent: true })
@@ -428,4 +552,4 @@ export async function routeVoiceCommand(raw, getStore) {
 
 /** Short help spoken on demand */
 export const VOICE_COMMAND_HELP =
-  'You can say: open dashboard, open chat, open demos, open vision, enable wake, always listening, enable gestures, set focus to a project, research a topic, build me a website, read my brief, save to vault, open demo by name, or just ask a question.'
+  'You can say: open intel, scan for fastapi, open dashboard, open chat, research a topic, or just ask a question.'

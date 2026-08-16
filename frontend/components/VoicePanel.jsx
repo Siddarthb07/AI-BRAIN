@@ -182,14 +182,14 @@ export default function VoicePanel() {
             preferBackend: false,
             browserOnly: true,
             lang: 'en-US',
-            rate: 1.08,
+            rate: 1.32,
             voiceMatchers: AMERICAN_VOICE_MATCHERS,
           })
         }
         if (routed.streamChat && routed.chat) {
           const speaker = createStreamingSpeaker({
             lang: 'en-US',
-            rate: 1.08,
+            rate: 1.32,
             pitch: 1,
             voiceMatchers: AMERICAN_VOICE_MATCHERS,
             onStart: () => {
@@ -227,7 +227,7 @@ export default function VoicePanel() {
         preferBrowser: true,
         browserOnly: true,
         lang: 'en-US',
-        rate: 1.05,
+        rate: 1.32,
         voiceMatchers: AMERICAN_VOICE_MATCHERS,
       })
       setState(STATES.idle)
@@ -238,7 +238,7 @@ export default function VoicePanel() {
     // Live word-by-word speak while the LLM streams (browser TTS — lowest latency)
     const speaker = createStreamingSpeaker({
       lang: 'en-US',
-      rate: 1.08,
+      rate: 1.32,
       pitch: 1,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,
       onStart: () => {
@@ -285,7 +285,7 @@ export default function VoicePanel() {
       browserMaxChars: DEFAULT_SPEECH_MAX_CHARS,
       browserChunkSize: DEFAULT_SPEECH_CHUNK_CHARS,
       lang: 'en-US',
-      rate: 1.05,
+      rate: 1.32,
       pitch: 1,
       volume: 1,
       voiceMatchers: AMERICAN_VOICE_MATCHERS,

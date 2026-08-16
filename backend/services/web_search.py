@@ -53,6 +53,7 @@ async def _brave_search(query: str, key: str, limit: int) -> list[dict[str, Any]
                         "title": item.get("title") or "",
                         "url": item.get("url") or "",
                         "snippet": item.get("description") or "",
+                        "provider": "brave",
                     }
                 )
             return out[:limit]
@@ -79,6 +80,7 @@ async def _tavily_search(query: str, key: str, limit: int) -> list[dict[str, Any
                         "title": item.get("title") or "",
                         "url": item.get("url") or "",
                         "snippet": item.get("content") or "",
+                        "provider": "tavily",
                     }
                 )
             return out[:limit]
@@ -129,7 +131,7 @@ async def _duckduckgo_search(query: str, limit: int) -> list[dict[str, Any]]:
         if not href.startswith("http"):
             continue
         snip = re.sub(r"\s+", " ", (snippets[i] if i < len(snippets) else "")).strip()[:280]
-        results.append({"title": title or href, "url": href, "snippet": snip})
+        results.append({"title": title or href, "url": href, "snippet": snip, "provider": "ddg"})
         if len(results) >= limit:
             break
 
@@ -146,7 +148,7 @@ async def _duckduckgo_search(query: str, limit: int) -> list[dict[str, Any]]:
         title = re.sub(r"<[^>]+>", "", match.group(2)).strip()
         if not href.startswith("http") or "duckduckgo.com" in href:
             continue
-        results.append({"title": title or href, "url": href, "snippet": ""})
+        results.append({"title": title or href, "url": href, "snippet": "", "provider": "ddg"})
         if len(results) >= limit:
             break
 
@@ -185,6 +187,7 @@ async def _wikipedia_fallback(query: str, limit: int) -> list[dict[str, Any]]:
                         "title": title,
                         "url": urls[i] if i < len(urls) else "",
                         "snippet": descs[i] if i < len(descs) else "",
+                        "provider": "wikipedia",
                     }
                 )
             return out[:limit]
@@ -216,6 +219,7 @@ async def _duckduckgo_instant(query: str, limit: int) -> list[dict[str, Any]]:
                 "title": data.get("Heading") or query,
                 "url": abs_url,
                 "snippet": abstract[:400],
+                "provider": "ddg",
             }
         )
     for topic in data.get("RelatedTopics") or []:
