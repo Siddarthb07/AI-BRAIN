@@ -91,7 +91,7 @@ cd backend
 pip install -r requirements.txt
 # Windows needs ffmpeg for Whisper:
 # Download from https://ffmpeg.org and add to PATH
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
 ### Frontend
@@ -126,15 +126,17 @@ docker run -p 6333:6333 qdrant/qdrant
 
 ## API Reference
 
+Base URL: **http://localhost:8001** (Docker Compose) or **http://localhost:8002** (native Quick Start). Examples below use **8001**.
+
 ### Health
 ```
-GET http://localhost:8000/health
+GET http://localhost:8001/health
 → { "status": "ok" }
 ```
 
 ### Set Context
 ```
-POST http://localhost:8000/context
+POST http://localhost:8001/context
 {
   "daily_goals": ["Ship LexProbe MVP", "Review PRs"],
   "active_project": "LexProbe",
@@ -144,25 +146,25 @@ POST http://localhost:8000/context
 
 ### Ingest GitHub User
 ```
-GET http://localhost:8000/ingest/github/user/siddharthmishra
+GET http://localhost:8001/ingest/github/user/Siddarthb07
 → { "status": "ingesting", "repo_count": 12, "repos": [...] }
 ```
 
 ### Ingest Single Repo
 ```
-POST http://localhost:8000/ingest/github
-{ "owner": "siddharthmishra", "repo": "lexprobe" }
+POST http://localhost:8001/ingest/github
+{ "owner": "Siddarthb07", "repo": "AI-BRAIN" }
 ```
 
 ### Pull HN Signals
 ```
-GET http://localhost:8000/ingest/external
+GET http://localhost:8001/ingest/external
 → { "status": "ok", "stories": 15, "top": [...] }
 ```
 
 ### Daily Brief
 ```
-GET http://localhost:8000/brief
+GET http://localhost:8001/brief
 → {
     "date": "Tuesday, April 1 2025",
     "greeting": "Good morning...",
@@ -175,14 +177,14 @@ GET http://localhost:8000/brief
 
 ### Chat
 ```
-POST http://localhost:8000/chat
+POST http://localhost:8001/chat
 { "message": "How is my LexProbe architecture?" }
 → { "response": "Your LexProbe stack...", "context_used": true }
 ```
 
 ### Voice — Transcribe Audio
 ```
-POST http://localhost:8000/voice/input
+POST http://localhost:8001/voice/input
 Content-Type: multipart/form-data
 file: <audio.webm>
 → { "text": "what should I work on today" }
@@ -190,14 +192,14 @@ file: <audio.webm>
 
 ### Voice — Synthesize Speech
 ```
-POST http://localhost:8000/voice/output
+POST http://localhost:8001/voice/output
 { "text": "JARVIS online. Here is your brief..." }
 → audio/wav binary
 ```
 
 ### Voice — Test TTS
 ```
-GET http://localhost:8000/voice/test
+GET http://localhost:8001/voice/test
 → audio/wav binary
 ```
 
@@ -265,7 +267,7 @@ Once connected, the brief and chat views use upcoming events as schedule context
 ## Folder Structure
 
 ```
-jarvis-ai-brain/
+AI-BRAIN/
 ├── backend/
 │   ├── main.py                  # FastAPI app + CORS
 │   ├── routers/
